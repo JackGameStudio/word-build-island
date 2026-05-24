@@ -1,0 +1,178 @@
+@import url('https://fonts.googleapis.com/css2?family=Silkscreen&display=swap');
+
+:root {
+  --pixel-font: 'Silkscreen', 'Press Start 2P', monospace;
+  --color-bg: #1a1a2e;
+  --color-surface: #2d2d44;
+  --color-text: #e2e8f0;
+  --color-muted: #94a3b8;
+  --color-overlay: rgba(26, 26, 46, 0.7);
+  --color-correct: #4ade80;
+  --color-wrong: #f87171;
+
+  --header-height: 48px;
+  --drawer-max-height: 50vh;
+  --overlay-height: 60vh;
+
+  --transition-fast: 150ms ease;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: var(--color-bg);
+  font-family: var(--pixel-font);
+  color: var(--color-text);
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  image-rendering: pixelated;
+}
+
+#app {
+  width: 100%; height: 100%;
+  display: flex; flex-direction: column;
+  position: relative;
+}
+
+/* ─── 九宫格面板 ─── */
+.panel-9slice {
+  border: 8px solid transparent;
+  border-image: url('/src/assets/images/panel-9slice.png') 8 fill stretch;
+  border-image-slice: 8 fill;
+  border-image-width: 8px;
+  background: var(--color-surface);
+}
+
+/* ─── 图片按钮（三态） ─── */
+.btn-pixel {
+  display: inline-flex;
+  align-items: center; justify-content: center;
+  padding: 8px 16px;
+  min-width: 120px; min-height: 36px;
+  border: none;
+  background: url('/src/assets/images/btn-normal.png') center / 100% 100% no-repeat;
+  color: var(--color-text);
+  font-family: var(--pixel-font);
+  font-size: 13px;
+  cursor: pointer;
+  image-rendering: pixelated;
+  transition: transform var(--transition-fast);
+}
+.btn-pixel:hover  { background-image: url('/src/assets/images/btn-hover.png'); }
+.btn-pixel:active { transform: scale(0.95); }
+.btn-pixel.disabled {
+  background-image: url('/src/assets/images/btn-disabled.png');
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ─── 资源栏 ─── */
+.resource-bar {
+  height: var(--header-height);
+  display: flex; align-items: center;
+  gap: 16px; padding: 0 16px;
+  background: var(--color-surface);
+  border-bottom: 2px solid #444;
+  flex-shrink: 0;
+  z-index: 10;
+}
+.resource-item {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 13px;
+}
+.resource-icon {
+  width: 24px; height: 24px;
+  display: inline-block;
+}
+
+/* ─── 岛屿 Canvas 容器 ─── */
+.island-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+.island-container canvas {
+  display: block;
+}
+
+/* ─── 遮罩层 ─── */
+.overlay-backdrop {
+  position: absolute;
+  inset: var(--header-height) 0 0 0;
+  background: var(--color-overlay);
+  z-index: 20;
+  transition: opacity var(--transition-fast);
+  pointer-events: none;
+}
+.overlay-backdrop.visible {
+  pointer-events: auto;
+}
+
+/* ─── 底部滑出面板 ─── */
+.slide-panel {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  max-height: var(--overlay-height);
+  z-index: 30;
+  transform: translateY(100%);
+  transition: transform var(--transition-fast);
+  overflow-y: auto;
+}
+.slide-panel.open {
+  transform: translateY(0);
+}
+
+/* ─── 背词面板 ─── */
+.vocab-panel {
+  padding: 16px;
+  display: flex; flex-direction: column;
+  gap: 12px;
+}
+.vocab-word {
+  font-size: 24px;
+  text-align: center;
+  padding: 16px 0;
+}
+.vocab-options {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* ─── 动画 ─── */
+@keyframes fly-to-bar {
+  0%   { opacity: 1; transform: scale(1) translate(0, 0); }
+  100% { opacity: 0; transform: scale(0.3) translateY(-200px); }
+}
+@keyframes toast-in {
+  0%   { opacity: 0; transform: translateY(20px); }
+  20%  { opacity: 1; transform: translateY(0); }
+  80%  { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-10px); }
+}
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25%  { transform: translateX(-8px); }
+  75%  { transform: translateX(8px); }
+}
+
+/* ─── Toast ─── */
+.toast-container {
+  position: fixed;
+  top: 56px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  display: flex; flex-direction: column;
+  gap: 8px; align-items: center;
+  pointer-events: none;
+}
+.toast-msg {
+  padding: 8px 16px;
+  background: var(--color-surface);
+  border: 2px solid #555;
+  font-size: 12px;
+  animation: toast-in 2s ease forwards;
+}
