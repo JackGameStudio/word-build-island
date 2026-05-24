@@ -94,11 +94,13 @@ export function createBuildDrawer(assets, resources, vocab, island, onBuild) {
   function show() {
     render();
     overlay.style.display = 'block';
+    overlay.classList.add('visible');
     requestAnimationFrame(() => panel.classList.add('open'));
   }
 
   function hide() {
     panel.classList.remove('open');
+    overlay.classList.remove('visible');
     setTimeout(() => { overlay.style.display = 'none'; }, 300);
     transition(AppState.IDLE);
   }

@@ -46,6 +46,7 @@ export function createVocabOverlay(assets, vocabArray, onReward) {
     sessionRewards = {};
     showWord(due[currentIndex]);
     overlay.style.display = 'block';
+    overlay.classList.add('visible');
     requestAnimationFrame(() => panel.classList.add('open'));
   }
 
@@ -137,6 +138,7 @@ export function createVocabOverlay(assets, vocabArray, onReward) {
 
   function hide() {
     panel.classList.remove('open');
+    overlay.classList.remove('visible');
     setTimeout(() => { overlay.style.display = 'none'; }, 300);
   }
 
