@@ -6,6 +6,7 @@
 
 import { getDueWords, gradeWord, getQuizOptions } from '../core/vocab-engine.js';
 import { rewardForReview, mergeResources } from '../core/economy.js';
+import { transition } from '../core/state.js';
 import { AppState } from '../data/constants.js';
 
 export function createVocabOverlay(assets, vocabArray, onReward) {
@@ -22,6 +23,13 @@ export function createVocabOverlay(assets, vocabArray, onReward) {
   const panel = document.createElement('div');
   panel.className = 'slide-panel panel-9slice vocab-panel';
 
+  // 关闭按钮
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'btn-pixel';
+  closeBtn.textContent = '✕ 退出';
+  closeBtn.style.cssText = 'align-self:flex-end;font-size:11px;padding:4px 10px;margin-bottom:4px;';
+  closeBtn.onclick = hide;
+
   const wordEl = document.createElement('div');
   wordEl.className = 'vocab-word';
 
@@ -31,7 +39,7 @@ export function createVocabOverlay(assets, vocabArray, onReward) {
   const progressEl = document.createElement('div');
   progressEl.style.cssText = 'text-align:center;font-size:11px;color:var(--color-muted);margin-top:8px;';
 
-  panel.append(wordEl, optionsGrid, progressEl);
+  panel.append(closeBtn, wordEl, optionsGrid, progressEl);
   overlay.appendChild(panel);
 
   // ─── 开始一组（最多5个到期词） ───
@@ -140,6 +148,7 @@ export function createVocabOverlay(assets, vocabArray, onReward) {
     panel.classList.remove('open');
     overlay.classList.remove('visible');
     setTimeout(() => { overlay.style.display = 'none'; }, 300);
+    transition(AppState.IDLE);
   }
 
   function show() { startSession(); }
