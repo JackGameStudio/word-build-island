@@ -117,8 +117,8 @@ async function bootstrap() {
     transition(AppState.IDLE);
   }
 
-  // 幽灵预览 — 鼠标跟随
-  island.canvas.addEventListener('mousemove', (e) => {
+  // 幽灵预览 — 鼠标/触摸跟随
+  island.canvas.addEventListener('pointermove', (e) => {
     if (getState() !== AppState.PREVIEW || !previewBuilding) return;
     const rect = island.canvas.getBoundingClientRect();
     const sx = e.clientX - rect.left;
