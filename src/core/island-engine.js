@@ -1,6 +1,6 @@
 /**
  * island-engine.js
- * Canvas 渲染引擎 — 俯视 12×12 网格 + sprite 切图 + 拖拽平移
+ * Canvas 渲染引擎 — 俯视 12×12 网格 + sprite 切图 + 拖拽平移 + 幽灵预览
  * 混合方案：Canvas 负责游戏画面，外部 CSS 负责 UI 面板
  */
 
@@ -22,6 +22,9 @@ export function createIslandEngine(container, assets) {
   let buildings = [];
   let offsetX = 0;
   let offsetY = 0;
+
+  // 幽灵预览
+  let ghost = null; // { spriteIndex, gx, gy, valid }
 
   // 拖拽状态
   let isDragging = false;
@@ -52,7 +55,6 @@ export function createIslandEngine(container, assets) {
           b.x * S, b.y * S, S, S
         );
       } else {
-        // fallback: 纯色方块 + emoji
         ctx.fillStyle = '#8B4513';
         ctx.fillRect(b.x * S + 4, b.y * S + 4, S - 8, S - 8);
         ctx.font = `${S * 0.5}px sans-serif`;
@@ -61,6 +63,32 @@ export function createIslandEngine(container, assets) {
         ctx.fillText(b.icon || '🏠', b.x * S + S / 2, b.y * S + S / 2);
       }
     });
+
+    // 幽灵预览
+    if (ghost) {
+      const { spriteIndex, gx, gy, valid } = ghost;
+
+      // 高亮格子
+      ctx.fillStyle = valid ? 'rgba(74, 222, 128, 0.3)' : 'rgba(248, 113, 113, 0.3)';
+      ctx.fillRect(gx * S, gy * S, S, S);
+
+      // 半透明 sprite
+      ctx.globalAlpha = 0.5;
+      if (assets.spritesheet && spriteIndex !== undefined) {
+        drawSprite(ctx, assets.spritesheet, spriteIndex, SPRITE.CELL_W, SPRITE.CELL_H,
+          gx * S, gy * S, S, S);
+      } else {
+        ctx.fillStyle = '#888';
+        ctx.fillRect(gx * S + 4, gy * S + 4, S - 8, S - 8);
+      }
+      ctx.globalAlpha = 1;
+
+      // 边框
+      ctx.strokeStyle = valid ? '#4ade80' : '#f87171';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(gx * S + 1, gy * S + 1, S - 2, S - 2);
+      ctx.lineWidth = 1;
+    }
 
     ctx.restore();
   }
@@ -118,6 +146,14 @@ export function createIslandEngine(container, assets) {
         render();
       }
     },
+
+    // ─── 幽灵预览 ───
+    setGhost(building, gx, gy, valid) {
+      ghost = { spriteIndex: building?.spriteIndex, gx, gy, valid };
+      render();
+    },
+    clearGhost() { ghost = null; render(); },
+    getGhost() { return ghost; },
 
     screenToGrid(sx, sy) {
       return {

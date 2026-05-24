@@ -81,58 +81,119 @@ async function bootstrap() {
   app.appendChild(vocabOverlay.element);
 
   // 建造抽屉
+  // ─── 预览模式状态 ───
+  let previewBuilding = null;
+  let cancelBarEl = null;
+
+  // 浮动取消栏（幽灵预览时显示）
+  function showCancelBar(building) {
+    if (!cancelBarEl) {
+      cancelBarEl = document.createElement('div');
+      cancelBarEl.style.cssText = `
+        position:absolute; bottom:60px; left:50%; transform:translateX(-50%);
+        display:flex; gap:8px; padding:8px 16px;
+        background:var(--color-surface); border:2px solid #555;
+        z-index:25; font-size:11px;
+      `;
+    }
+    cancelBarEl.innerHTML = `
+      <span>${building.icon} ${building.name} — 点击地图放置</span>
+      <button class="btn-pixel" id="cancel-build" style="font-size:11px;padding:2px 8px;min-width:auto;">✕ 取消</button>
+    `;
+    islandContainer.appendChild(cancelBarEl);
+    cancelBarEl.querySelector('#cancel-build').onclick = cancelPreview;
+    cancelBarEl.style.display = 'flex';
+  }
+
+  function hideCancelBar() {
+    if (cancelBarEl) cancelBarEl.style.display = 'none';
+  }
+
+  function cancelPreview() {
+    previewBuilding = null;
+    island.clearGhost();
+    islandContainer.style.cursor = '';
+    hideCancelBar();
+    transition(AppState.IDLE);
+  }
+
+  // 幽灵预览 — 鼠标跟随
+  island.canvas.addEventListener('mousemove', (e) => {
+    if (getState() !== AppState.PREVIEW || !previewBuilding) return;
+    const rect = island.canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const { x, y } = island.screenToGrid(sx, sy);
+    const inBounds = island.isInBounds(x, y);
+    const occupied = island.isOccupied(x, y);
+    const affordable = canAfford(data.resources, previewBuilding.cost);
+    const valid = inBounds && !occupied && affordable;
+    island.setGhost(previewBuilding, x, y, valid);
+  });
+
   const buildDrawer = createBuildDrawer(
     assets, data.resources, data.vocabulary, island,
     (building) => {
-      // 选择了建筑 → 进入预览模式（简化版：直接选空地放置）
+      // 选择建筑 → 进入预览模式
       transition(AppState.PREVIEW);
-      islandContainer.style.cursor = 'crosshair';
+      previewBuilding = building;
+      islandContainer.style.cursor = 'none';
+      showCancelBar(building);
 
-      const onClick = (e) => {
-        if (island.wasPanning) { island.resetPanFlag(); return; }
-        const rect = island.canvas.getBoundingClientRect();
-        const sx = e.clientX - rect.left;
-        const sy = e.clientY - rect.top;
-        const { x, y } = island.screenToGrid(sx, sy);
-
-        if (!island.isInBounds(x, y) || island.isOccupied(x, y)) {
-          toast.show('此处无法建造');
-          return;
-        }
-
-        if (!canAfford(data.resources, building.cost)) {
-          toast.show('资源不足');
-          cleanup();
-          return;
-        }
-
-        // 放置建筑
-        data.resources = deductResources(data.resources, building.cost);
-        island.addBuilding({
-          id: building.id,
-          name: building.name,
-          icon: building.icon,
-          spriteIndex: building.spriteIndex,
-          x, y
-        });
-        data.island.buildings = island.getBuildings();
-
-        resourceBar.update(data.resources, data.island.level);
-        toast.show(`${building.icon} ${building.name} 建成！`);
-        saveGameData(data);
-        cleanup();
-      };
-
-      function cleanup() {
-        island.canvas.removeEventListener('click', onClick);
-        islandContainer.style.cursor = '';
-        transition(AppState.IDLE);
-      }
-
-      island.canvas.addEventListener('click', onClick);
+      // 立即渲染初始幽灵（位置在屏幕中心）
+      const center = island.screenToGrid(
+        islandContainer.clientWidth / 2,
+        islandContainer.clientHeight / 2
+      );
+      island.setGhost(building, center.x, center.y, island.isInBounds(center.x, center.y));
     }
   );
   app.appendChild(buildDrawer.element);
+
+  // ─── 放置建筑（点击事件）───
+  island.canvas.addEventListener('click', (e) => {
+    if (getState() !== AppState.PREVIEW || !previewBuilding) return;
+    if (island.wasPanning) { island.resetPanFlag(); return; }
+
+    const rect = island.canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const { x, y } = island.screenToGrid(sx, sy);
+
+    if (!island.isInBounds(x, y) || island.isOccupied(x, y)) {
+      toast.show('此处无法建造');
+      return;
+    }
+
+    if (!canAfford(data.resources, previewBuilding.cost)) {
+      toast.show('资源不足');
+      return;
+    }
+
+    // 放置
+    data.resources = deductResources(data.resources, previewBuilding.cost);
+    island.addBuilding({
+      id: previewBuilding.id,
+      name: previewBuilding.name,
+      icon: previewBuilding.icon,
+      spriteIndex: previewBuilding.spriteIndex,
+      x, y
+    });
+    data.island.buildings = island.getBuildings();
+
+    resourceBar.update(data.resources, data.island.level);
+    toast.show(`${previewBuilding.icon} ${previewBuilding.name} 建成！`);
+    saveGameData(data);
+
+    cancelPreview();
+  });
+
+  // ESC 取消
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && getState() === AppState.PREVIEW) {
+      cancelPreview();
+    }
+  });
 
   // ─── 4. 底部按钮栏 ───
   const buttonBar = document.createElement('div');
