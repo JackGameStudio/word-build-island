@@ -215,7 +215,7 @@ async function bootstrap() {
     const sy = e.clientY - rect.top;
     const { x, y } = island.screenToGrid(sx, sy);
 
-    if (!island.isInBounds(x, y) || island.isOccupied(x, y)) {
+    if (!island.isInBounds(x, y) || island.isOccupied(x, y) || !island.isBuildable(x, y)) {
       toast.show('此处无法建造');
       return;
     }
