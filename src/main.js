@@ -7,14 +7,14 @@
 import { preloadAssets } from './core/asset-loader.js';
 import { initDB, saveGameData, loadGameData } from './core/storage.js';
 import { initVocabulary } from './core/vocab-engine.js';
-import { tickIncome, calculateOfflineIncome, mergeResources, deductResources, canAfford } from './core/economy.js';
+import { tickIncome, tickIncomeWithBuffs, calculateOfflineIncome, mergeResources, deductResources, canAfford, formatElapsed, formatIncome } from './core/economy.js';
 import { createIslandEngine } from './core/island-engine.js';
 import { createResourceBar } from './components/ResourceBar.js';
 import { createVocabOverlay } from './components/VocabOverlay.js';
 import { createBuildDrawer } from './components/BuildDrawer.js';
 import { createToast } from './components/Toast.js';
 import { transition, getState } from './core/state.js';
-import { STARTING_RESOURCES, ECONOMY_TICK, AppState } from './data/constants.js';
+import { STARTING_RESOURCES, ECONOMY_TICK, CELL_SIZE, AppState } from './data/constants.js';
 import { getBuildingById, countLearnedWords } from './data/buildings.js';
 
 async function bootstrap() {
@@ -44,9 +44,10 @@ async function bootstrap() {
   }
 
   // ─── 2. 离线收入结算 ───
+  const oldLastOnline = data.island.lastOnline || Date.now();
   let offlineIncome = {};
-  if (!isNewGame && data.island.lastOnline) {
-    offlineIncome = calculateOfflineIncome(data.island.buildings, data.island.lastOnline);
+  if (!isNewGame && oldLastOnline) {
+    offlineIncome = calculateOfflineIncome(data.island.buildings, oldLastOnline);
     data.resources = mergeResources(data.resources, offlineIncome);
   }
   data.island.lastOnline = Date.now();
@@ -227,27 +228,64 @@ async function bootstrap() {
   // ─── 5. 更新资源栏 ───
   resourceBar.update(data.resources, data.island.level);
 
-  // ─── 6. 离线收入 Toast ───
-  const totalOffline = Object.values(offlineIncome).reduce((s, v) => s + v, 0);
-  if (totalOffline > 0) {
-    const icons = { gold: '🪙', wood: '🪵', stone: '🪨', food: '🌾' };
-    const desc = Object.entries(offlineIncome)
-      .filter(([, v]) => v > 0)
-      .map(([k, v]) => `${icons[k] || k}+${v}`)
-      .join(' ');
-    toast.show(`欢迎回来！离线获得 ${desc}`);
+  // ─── 6. 资源飞入动画 ───
+  function animateTickIncome(buildingsWithIncome) {
+    buildingsWithIncome.forEach(b => {
+      const screen = island.gridToScreen(b.x, b.y);
+      const canvasRect = island.canvas.getBoundingClientRect();
+      const px = canvasRect.left + screen.x + CELL_SIZE / 2;
+      const py = canvasRect.top + screen.y;
+
+      Object.entries(b.income).forEach(([res, val]) => {
+        const el = document.createElement('span');
+        const icons = { gold: '🪙', wood: '🪵', stone: '🪨', food: '🌾' };
+        el.textContent = `+${val}${icons[res] || res}`;
+        el.style.cssText = `
+          position:fixed; left:${px}px; top:${py}px;
+          font-size:14px; color:var(--color-correct);
+          pointer-events:none; z-index:999;
+          animation: fly-to-bar 1.2s ease-out forwards;
+        `;
+        document.body.appendChild(el);
+        el.addEventListener('animationend', () => el.remove());
+      });
+    });
   }
 
-  // ─── 7. 被动收入 tick ───
+  // ─── 7. 离线收入 + 打卡 ───
+  // 打卡逻辑
+  const today = new Date().toISOString().split('T')[0];
+  if (data.stats.lastActive !== today) {
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    if (data.stats.lastActive === yesterday) {
+      data.stats.streak = (data.stats.streak || 0) + 1;
+    } else {
+      data.stats.streak = 1;
+    }
+    data.stats.lastActive = today;
+  }
+
+  const totalOffline = Object.values(offlineIncome).reduce((s, v) => s + v, 0);
+  if (totalOffline > 0) {
+    const timeAgo = formatElapsed(oldLastOnline);
+    const desc = formatIncome(offlineIncome);
+    toast.show(`🕐 离线 ${timeAgo}\n收获: ${desc}`, 3000);
+  }
+  if (!isNewGame) {
+    toast.show(`🔥 连续打卡 ${data.stats.streak} 天！`, 2000);
+  }
+
+  // ─── 8. 被动收入 tick（含 Buff + 飞入动画）───
   setInterval(() => {
-    const income = tickIncome(data.island.buildings);
+    const { income, breakdown } = tickIncomeWithBuffs(data.island.buildings, data.stats);
     if (Object.keys(income).length > 0) {
       data.resources = mergeResources(data.resources, income);
       resourceBar.update(data.resources, data.island.level);
+      if (breakdown.length > 0) animateTickIncome(breakdown);
     }
   }, ECONOMY_TICK);
 
-  // ─── 8. 自动存档（30s）───
+  // ─── 9. 自动存档（30s）───
   setInterval(() => {
     data.island.buildings = island.getBuildings();
     data.island.lastOnline = Date.now();

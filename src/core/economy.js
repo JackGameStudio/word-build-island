@@ -32,6 +32,7 @@ export function rewardForReview(word, quality) {
 
 /**
  * 被动收入 tick — 所有建筑的 income 累加
+ * @returns {{gold?:number, wood?:number, stone?:number, food?:number}}
  */
 export function tickIncome(buildings) {
   const income = {};
@@ -43,6 +44,34 @@ export function tickIncome(buildings) {
     });
   });
   return income;
+}
+
+/**
+ * 被动收入 tick（含 Buff 加成 + 每建筑明细）
+ * @returns {{income:object, breakdown:Array<{x,y,icon,income:object}>}}
+ */
+export function tickIncomeWithBuffs(buildings, stats) {
+  const buffs = calculateBuffs(buildings, stats || {});
+  const income = {};
+  const breakdown = [];
+
+  buildings.forEach(b => {
+    const def = getBuildingById(b.id);
+    if (!def?.income) return;
+    const buildingIncome = {};
+    Object.entries(def.income).forEach(([res, val]) => {
+      let total = val;
+      if (res === 'wood' && buffs.woodBonus) total += buffs.woodBonus;
+      if (res === 'stone' && buffs.stoneBonus) total += buffs.stoneBonus;
+      income[res] = (income[res] || 0) + total;
+      buildingIncome[res] = total;
+    });
+    if (Object.keys(buildingIncome).length > 0) {
+      breakdown.push({ x: b.x, y: b.y, icon: def.icon, income: buildingIncome });
+    }
+  });
+
+  return { income, breakdown };
 }
 
 /**
@@ -122,4 +151,22 @@ export function deductResources(resources, cost) {
     result[k] = (result[k] || 0) - v;
   });
   return result;
+}
+
+// ─── 时间 / 收入格式化 ───
+
+export function formatElapsed(lastOnline) {
+  const sec = Math.floor((Date.now() - lastOnline) / 1000);
+  if (sec < 60) return `${sec}秒`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}分钟`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}小时${Math.floor((sec % 3600) / 60)}分钟`;
+  return `${Math.floor(sec / 86400)}天${Math.floor((sec % 86400) / 3600)}小时`;
+}
+
+export function formatIncome(income) {
+  const icons = { gold: '🪙', wood: '🪵', stone: '🪨', food: '🌾', star: '⭐' };
+  return Object.entries(income)
+    .filter(([, v]) => v > 0)
+    .map(([k, v]) => `${icons[k] || k}+${v}`)
+    .join('  ');
 }
