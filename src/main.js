@@ -15,7 +15,7 @@ import { createBuildDrawer } from './components/BuildDrawer.js';
 import { createToast } from './components/Toast.js';
 import { createAchievementsPanel } from './components/AchievementsPanel.js';
 import { transition, getState } from './core/state.js';
-import { STARTING_RESOURCES, ECONOMY_TICK, CELL_SIZE, AppState } from './data/constants.js';
+import { STARTING_RESOURCES, ECONOMY_TICK, CELL_SIZE, AppState, DEFAULT_ISLAND_TERRAIN } from './data/constants.js';
 import { getBuildingById, countLearnedWords } from './data/buildings.js';
 import { checkAchievements } from './data/achievements.js';
 
@@ -40,15 +40,17 @@ async function bootstrap() {
     data = {
       resources: { ...STARTING_RESOURCES },
       vocabulary: initVocabulary(),
-      island: { level: 1, buildings: [], lastOnline: Date.now() },
+      island: { level: 1, buildings: [], terrainMap: structuredClone(DEFAULT_ISLAND_TERRAIN), lastOnline: Date.now() },
       stats: { streak: 0, lastActive: new Date().toISOString().split('T')[0],
                wordsCorrect: 0, tickIncomeCount: 0 },
       achievements: []
     };
   }
 
-  // 兼容旧存档
-  if (!data.stats.wordsCorrect) data.stats.wordsCorrect = 0;
+  // 兼容旧存档（无 terrainMap）
+  if (!data.island.terrainMap) {
+    data.island.terrainMap = structuredClone(DEFAULT_ISLAND_TERRAIN);
+  }
   if (!data.stats.tickIncomeCount) data.stats.tickIncomeCount = 0;
   if (!data.achievements) data.achievements = [];
 
@@ -80,6 +82,7 @@ async function bootstrap() {
   const island = createIslandEngine(islandContainer, assets);
   islandContainer.appendChild(island.canvas);
   island.setBuildings(data.island.buildings);
+  island.setTerrainMap(data.island.terrainMap);
   island.render();
 
   // ─── 等级计算 ───
@@ -176,8 +179,9 @@ async function bootstrap() {
     const { x, y } = island.screenToGrid(sx, sy);
     const inBounds = island.isInBounds(x, y);
     const occupied = island.isOccupied(x, y);
+    const buildable = island.isBuildable(x, y);
     const affordable = canAfford(data.resources, previewBuilding.cost);
-    const valid = inBounds && !occupied && affordable;
+    const valid = inBounds && !occupied && buildable && affordable;
     island.setGhost(previewBuilding, x, y, valid);
   });
 

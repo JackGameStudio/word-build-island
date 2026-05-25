@@ -1,11 +1,14 @@
 /**
  * island-engine.js
- * Canvas 渲染引擎 — 俯视 12×12 网格 + sprite 切图 + 拖拽平移 + 幽灵预览
+ * Canvas 渲染引擎 — 俯视 12×12 网格 + 地形贴图 + sprite 建筑 + 拖拽平移 + 幽灵预览
  * 混合方案：Canvas 负责游戏画面，外部 CSS 负责 UI 面板
  */
 
-import { ISLAND_GRID_SIZE, CELL_SIZE, SPRITE } from '../data/constants.js';
-import { drawSprite } from './asset-loader.js';
+import { ISLAND_GRID_SIZE, CELL_SIZE, SPRITE, TERRAIN, DEFAULT_ISLAND_TERRAIN } from '../data/constants.js';
+import { drawSprite, drawTerrainTile } from './asset-loader.js';
+
+/** 不可建造的地形类型 */
+const BLOCKED_TERRAIN = new Set([TERRAIN.WATER, TERRAIN.STONE]);
 
 export function createIslandEngine(container, assets) {
   const G = ISLAND_GRID_SIZE;
@@ -14,12 +17,13 @@ export function createIslandEngine(container, assets) {
   const canvas = document.createElement('canvas');
   canvas.width = G * S;
   canvas.height = G * S;
-  canvas.style.cssText = 'display:block;background:#1a1a2e;image-rendering:pixelated;';
+  canvas.style.cssText = 'display:block;background:#1a3a5c;image-rendering:pixelated;';
 
   const ctx = canvas.getContext('2d');
   ctx.imageSmoothingEnabled = false;
 
   let buildings = [];
+  let terrainMap = structuredClone(DEFAULT_ISLAND_TERRAIN);
   let offsetX = 0;
   let offsetY = 0;
 
@@ -34,16 +38,33 @@ export function createIslandEngine(container, assets) {
   let dragOffsetY = 0;
   let wasPanning = false;
 
+  // ─── 渲染 ───
   function render() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save();
     ctx.translate(offsetX, offsetY);
 
-    // 草地双色格子
+    // 地形层
+    const hasTerrain = !!assets.terrain;
     for (let y = 0; y < G; y++) {
       for (let x = 0; x < G; x++) {
-        ctx.fillStyle = (x + y) % 2 === 0 ? '#4a7c4f' : '#3d6b42';
-        ctx.fillRect(x * S, y * S, S, S);
+        const type = terrainMap[y]?.[x] ?? 0;
+        const variant = (x + y) % 2; // 棋盘格亮/暗
+        if (hasTerrain) {
+          drawTerrainTile(ctx, assets.terrain, type, variant, x * S, y * S, S);
+        } else {
+          // fallback 纯色
+          const colors = [
+            ['#4a7c4f', '#3d6b42'], // grass
+            ['#d4b483', '#c9a76e'], // sand
+            ['#2980b9', '#2471a3'], // water
+            ['#2d5a27', '#244f20'], // forest
+            ['#7f8c8d', '#6c7a7b'], // stone
+          ];
+          const [c1, c2] = colors[type] || colors[0];
+          ctx.fillStyle = variant === 0 ? c1 : c2;
+          ctx.fillRect(x * S, y * S, S, S);
+        }
       }
     }
 
@@ -128,7 +149,7 @@ export function createIslandEngine(container, assets) {
     canvas.releasePointerCapture(e.pointerId);
   });
 
-  // ─── API ───
+    // ─── API ───
   const island = {
     canvas,
     render,
@@ -137,6 +158,11 @@ export function createIslandEngine(container, assets) {
 
     setBuildings(b) { buildings = b; render(); },
     getBuildings() { return buildings; },
+
+    setTerrainMap(map) { terrainMap = map; render(); },
+    getTerrainMap() { return terrainMap; },
+    getTerrainType(gx, gy) { return terrainMap[gy]?.[gx] ?? 0; },
+    isBuildable(gx, gy) { return !BLOCKED_TERRAIN.has(terrainMap[gy]?.[gx] ?? 0); },
 
     addBuilding(b) { buildings.push(b); render(); },
 
