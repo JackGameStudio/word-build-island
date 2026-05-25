@@ -273,8 +273,11 @@ async function bootstrap() {
   resetBtn.className = 'btn-pixel';
   resetBtn.textContent = '🔧 重置';
   resetBtn.style.cssText = 'background-image:url("/src/assets/images/btn-hover.png");font-size:10px;';
-  resetBtn.onclick = () => {
-    if (confirm('清除所有存档数据，重新开始？')) location.reload();
+  resetBtn.onclick = async () => {
+    if (!confirm('清除所有存档数据，重新开始？')) return;
+    const { clearDB } = await import('./core/storage.js');
+    await clearDB();
+    location.reload();
   };
   resetBtn.ondblclick = async () => {
     // 双击 = 直接重置（跳过确认）
