@@ -40,3 +40,14 @@ export async function loadGameData() {
     req.onerror = () => reject(req.error);
   });
 }
+
+/** 重置所有数据 */
+export async function clearDB() {
+  if (db) { db.close(); db = null; }
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(DB_NAME);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+    req.onblocked = () => { console.warn('DB delete blocked'); resolve(); };
+  });
+}

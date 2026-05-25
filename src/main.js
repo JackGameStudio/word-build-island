@@ -269,7 +269,21 @@ async function bootstrap() {
     }
   };
 
-  buttonBar.append(vocabBtn, buildBtn);
+  const resetBtn = document.createElement('button');
+  resetBtn.className = 'btn-pixel';
+  resetBtn.textContent = '🔧 重置';
+  resetBtn.style.cssText = 'background-image:url("/src/assets/images/btn-hover.png");font-size:10px;';
+  resetBtn.onclick = () => {
+    if (confirm('清除所有存档数据，重新开始？')) location.reload();
+  };
+  resetBtn.ondblclick = async () => {
+    // 双击 = 直接重置（跳过确认）
+    const { clearDB } = await import('./core/storage.js');
+    await clearDB();
+    location.reload();
+  };
+
+  buttonBar.append(vocabBtn, buildBtn, resetBtn);
   app.appendChild(buttonBar);
 
   // ─── 5. 更新资源栏 ───
