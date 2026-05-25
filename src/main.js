@@ -304,24 +304,33 @@ async function bootstrap() {
 
   // ─── 6. 资源飞入动画 ───
   function animateTickIncome(buildingsWithIncome) {
+    const bar = document.querySelector('.resource-bar');
+    const barRect = bar?.getBoundingClientRect();
+    const targetY = barRect ? barRect.top + barRect.height / 2 : 48;
+
     buildingsWithIncome.forEach(b => {
       const screen = island.gridToScreen(b.x, b.y);
       const canvasRect = island.canvas.getBoundingClientRect();
       const px = canvasRect.left + screen.x + CELL_SIZE / 2;
       const py = canvasRect.top + screen.y;
 
-      Object.entries(b.income).forEach(([res, val]) => {
+      const icons = { gold: '🪙', wood: '🪵', stone: '🪨', food: '🌾' };
+      Object.entries(b.income).filter(([,v]) => v > 0).forEach(([res, val], idx) => {
         const el = document.createElement('span');
-        const icons = { gold: '🪙', wood: '🪵', stone: '🪨', food: '🌾' };
         el.textContent = `+${val}${icons[res] || res}`;
+        const offsetY = idx * 16;
+        const dy = targetY - (py + offsetY);
         el.style.cssText = `
-          position:fixed; left:${px}px; top:${py}px;
+          position:fixed; left:${px}px; top:${py + offsetY}px;
           font-size:14px; color:var(--color-correct);
           pointer-events:none; z-index:999;
-          animation: fly-to-bar 1.2s ease-out forwards;
         `;
         document.body.appendChild(el);
-        el.addEventListener('animationend', () => el.remove());
+        const anim = el.animate([
+          { opacity: 1, transform: 'scale(1) translate(0, 0)' },
+          { opacity: 0, transform: `scale(0.3) translate(${idx * 16 - 8}px, ${dy}px)` }
+        ], { duration: 1200, easing: 'ease-out', fill: 'forwards' });
+        anim.onfinish = () => el.remove();
       });
     });
   }

@@ -119,20 +119,31 @@ export function createVocabOverlay(assets, vocabArray, onReward) {
     hide();
   }
 
-  // ─── 资源飞入动画 ───
+  // ─── 资源飞入动画（飞向顶部资源栏）───
   function animateFly(fromEl, reward) {
-    Object.entries(reward).forEach(([res, val]) => {
+    const rect = fromEl.getBoundingClientRect();
+    const startX = rect.left + rect.width / 2;
+    const startY = rect.top;
+    const bar = document.querySelector('.resource-bar');
+    const barRect = bar?.getBoundingClientRect();
+    const targetY = barRect ? barRect.top + barRect.height / 2 : 48;
+
+    Object.entries(reward).filter(([,v]) => v > 0).forEach(([res, val], idx) => {
       const el = document.createElement('span');
       el.textContent = `+${val} ${resIcon(res)}`;
-      const rect = fromEl.getBoundingClientRect();
+      const offsetY = idx * 18;
+      const dy = targetY - (startY + offsetY);
       el.style.cssText = `
-        position:fixed; left:${rect.left + rect.width/2}px; top:${rect.top}px;
-        font-size:18px; color:var(--color-correct);
+        position:fixed; left:${startX}px; top:${startY + offsetY}px;
+        font-size:16px; color:var(--color-correct);
         pointer-events:none; z-index:999;
-        animation: fly-to-bar 0.8s ease-out forwards;
       `;
       document.body.appendChild(el);
-      el.addEventListener('animationend', () => el.remove());
+      const anim = el.animate([
+        { opacity: 1, transform: 'scale(1) translate(0, 0)' },
+        { opacity: 0, transform: `scale(0.4) translate(${idx * 20 - 10}px, ${dy}px)` }
+      ], { duration: 800, easing: 'ease-out', fill: 'forwards' });
+      anim.onfinish = () => el.remove();
     });
   }
 
