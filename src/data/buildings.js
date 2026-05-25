@@ -11,12 +11,12 @@ export const BUILDINGS = [
     icon: '🌲',
     spriteIndex: 0,
     cost: { gold: 5 },
-    income: {},
+    income: { wood: 1 },
     buff: null,
     starRequired: 0,
     wordRequired: 0,
     tier: 0,
-    description: '装饰你的岛屿'
+    description: '每6秒产出1木材'
   },
   {
     id: 'lumberjack',
@@ -24,12 +24,12 @@ export const BUILDINGS = [
     icon: '🪓',
     spriteIndex: 1,
     cost: { gold: 10 },
-    income: { wood: 1 },
-    buff: { type: 'woodBonus', value: 1, description: '学自然类词 wood+1' },
-    starRequired: 1,
-    wordRequired: 5,
+    income: { wood: 2 },
+    buff: { type: 'woodBonus', value: 1, description: '所有木材建筑产量+1' },
+    starRequired: 0,
+    wordRequired: 0,
     tier: 0,
-    description: '每6秒产出1木材'
+    description: '每6秒产出2木材'
   },
   {
     id: 'cottage',
@@ -39,8 +39,8 @@ export const BUILDINGS = [
     cost: { gold: 50, wood: 20 },
     income: { gold: 1 },
     buff: { type: 'streakGold', value: 10, description: '连续3天每日+10金币' },
-    starRequired: 2,
-    wordRequired: 10,
+    starRequired: 0,
+    wordRequired: 1,
     tier: 0,
     description: '每6秒产出1金币'
   },
@@ -52,8 +52,8 @@ export const BUILDINGS = [
     cost: { gold: 100, wood: 30 },
     income: { food: 2 },
     buff: { type: 'autoReview', value: 5, description: '每日自动复习5词' },
-    starRequired: 5,
-    wordRequired: 25,
+    starRequired: 0,
+    wordRequired: 5,
     tier: 1,
     description: '每6秒产出2食物'
   },
@@ -65,8 +65,8 @@ export const BUILDINGS = [
     cost: { gold: 50, wood: 20 },
     income: { stone: 1 },
     buff: { type: 'stoneBonus', value: 1, description: '学科学类词 stone+1' },
-    starRequired: 10,
-    wordRequired: 50,
+    starRequired: 0,
+    wordRequired: 10,
     tier: 1,
     description: '每6秒产出1石材'
   }
