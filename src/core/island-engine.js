@@ -114,39 +114,95 @@ export function createIslandEngine(container, assets) {
     ctx.restore();
   }
 
-  // ─── Pointer events ───
+  // ─── Pointer events（移动端双指平移，桌面端单指平移）───
+  const pointers = new Map(); // pointerId → { startX, startY }
+  let pinchStartDist = 0;
+  let pinchStartScale = 1;
+
+  function getMidpoint(p1, p2) {
+    return { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+  }
+
+  function getPinchDist(p1, p2) {
+    return Math.hypot(p2.x - p1.x, p2.y - p1.y);
+  }
+
   function getPos(e) {
     const rect = canvas.getBoundingClientRect();
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }
 
+  // 判断是否触摸设备（touch 为主输入）
+  const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 1;
+
   canvas.addEventListener('pointerdown', (e) => {
     const pos = getPos(e);
-    dragStartX = pos.x;
-    dragStartY = pos.y;
-    dragOffsetX = offsetX;
-    dragOffsetY = offsetY;
-    isDragging = true;
-    wasPanning = false;
+    pointers.set(e.pointerId, pos);
+
+    if (pointers.size === 1) {
+      // 单指：桌面单指拖拽，移动端不触发平移（给 ghost 预览用）
+      dragStartX = pos.x;
+      dragStartY = pos.y;
+      dragOffsetX = offsetX;
+      dragOffsetY = offsetY;
+      isDragging = !isTouchDevice; // 桌面端才支持单指拖拽
+      wasPanning = false;
+    } else if (pointers.size === 2) {
+      // 双指：进入平移模式
+      isDragging = true;
+      wasPanning = false;
+      const entries = [...pointers.values()];
+      const mid = getMidpoint(entries[0], entries[1]);
+      dragStartX = mid.x;
+      dragStartY = mid.y;
+      dragOffsetX = offsetX;
+      dragOffsetY = offsetY;
+      pinchStartDist = getPinchDist(entries[0], entries[1]);
+      pinchStartScale = 1;
+    }
     canvas.setPointerCapture(e.pointerId);
   });
 
   canvas.addEventListener('pointermove', (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, getPos(e));
+
     if (!isDragging) return;
-    const pos = getPos(e);
-    const dx = pos.x - dragStartX;
-    const dy = pos.y - dragStartY;
-    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
-      wasPanning = true;
+
+    if (pointers.size === 1 && !isTouchDevice) {
+      // 桌面单指拖拽
+      const pos = getPos(e);
+      const dx = pos.x - dragStartX;
+      const dy = pos.y - dragStartY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) wasPanning = true;
+      offsetX = dragOffsetX + dx;
+      offsetY = dragOffsetY + dy;
+    } else if (pointers.size >= 2) {
+      // 双指平移
+      const entries = [...pointers.values()];
+      const mid = getMidpoint(entries[0], entries[1]);
+      const dx = mid.x - dragStartX;
+      const dy = mid.y - dragStartY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) wasPanning = true;
+      offsetX = dragOffsetX + dx;
+      offsetY = dragOffsetY + dy;
     }
-    offsetX = dragOffsetX + dx;
-    offsetY = dragOffsetY + dy;
     render();
   });
 
   canvas.addEventListener('pointerup', (e) => {
-    isDragging = false;
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) {
+      isDragging = pointers.size === 1 && !isTouchDevice;
+    }
     canvas.releasePointerCapture(e.pointerId);
+  });
+
+  canvas.addEventListener('pointercancel', (e) => {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) {
+      isDragging = pointers.size === 1 && !isTouchDevice;
+    }
   });
 
     // ─── API ───
