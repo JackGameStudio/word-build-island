@@ -8,7 +8,7 @@ import { canAfford } from '../core/economy.js';
 import { getState, transition } from '../core/state.js';
 import { AppState } from '../data/constants.js';
 
-export function createBuildDrawer(assets, resources, vocab, islandLevel, island, onBuild) {
+export function createBuildDrawer(assets, getResources, vocab, islandLevel, island, onBuild) {
   let localLevel = islandLevel;
   let totalWords = countLearnedWords(vocab);
 
@@ -62,7 +62,7 @@ export function createBuildDrawer(assets, resources, vocab, islandLevel, island,
       btn.textContent = '建造';
       btn.style.cssText = 'font-size:11px;padding:4px 10px;min-width:auto;';
 
-      const check = canBuild(building, resources, localLevel, totalWords);
+      const check = canBuild(building, getResources(), localLevel, totalWords);
       if (!check.ok) {
         btn.classList.add('disabled');
         btn.textContent = '🔒';

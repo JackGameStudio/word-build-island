@@ -180,7 +180,7 @@ async function bootstrap() {
   });
 
   const buildDrawer = createBuildDrawer(
-    assets, data.resources, data.vocabulary, data.island.level, island,
+    assets, () => data.resources, data.vocabulary, data.island.level, island,
     (building) => {
       // 选择建筑 → 进入预览模式
       transition(AppState.PREVIEW);
