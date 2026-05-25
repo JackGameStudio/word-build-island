@@ -1,6 +1,6 @@
 // 开局资源（全新开始）
 export const STARTING_RESOURCES = {
-  gold: 30, wood: 20, stone: 5, food: 10, star: 0
+  gold: 50, wood: 30, stone: 5, food: 10, star: 0
 };
 
 // 经济系统
