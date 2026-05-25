@@ -114,7 +114,7 @@ async function bootstrap() {
     island.clearGhost();
     islandContainer.style.cursor = '';
     hideCancelBar();
-    transition(AppState.IDLE);
+    if (getState() === AppState.PREVIEW) transition(AppState.IDLE);
   }
 
   // 幽灵预览 — 鼠标/触摸跟随

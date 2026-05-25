@@ -71,7 +71,7 @@ export function createBuildDrawer(assets, resources, vocab, island, onBuild) {
 
       btn.onclick = () => {
         if (!check.ok) return;
-        hide();
+        hide(true); // 不切状态 — 留给外层切 PREVIEW
         onBuild?.(building);
       };
 
@@ -86,7 +86,7 @@ export function createBuildDrawer(assets, resources, vocab, island, onBuild) {
   }
 
   // ─── 事件 ───
-  closeBtn.onclick = hide;
+  closeBtn.onclick = () => hide();
   overlay.onclick = (e) => {
     if (e.target === overlay) hide();
   };
@@ -98,11 +98,11 @@ export function createBuildDrawer(assets, resources, vocab, island, onBuild) {
     requestAnimationFrame(() => panel.classList.add('open'));
   }
 
-  function hide() {
+  function hide(skipTransition = false) {
     panel.classList.remove('open');
     overlay.classList.remove('visible');
     setTimeout(() => { overlay.style.display = 'none'; }, 300);
-    transition(AppState.IDLE);
+    if (!skipTransition) transition(AppState.IDLE);
   }
 
   return { element: overlay, show, hide, refresh: render };
