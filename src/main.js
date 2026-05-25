@@ -13,6 +13,7 @@ import { createResourceBar } from './components/ResourceBar.js';
 import { createVocabOverlay } from './components/VocabOverlay.js';
 import { createBuildDrawer } from './components/BuildDrawer.js';
 import { createToast } from './components/Toast.js';
+import { createAchievementsPanel } from './components/AchievementsPanel.js';
 import { transition, getState } from './core/state.js';
 import { STARTING_RESOURCES, ECONOMY_TICK, CELL_SIZE, AppState } from './data/constants.js';
 import { getBuildingById, countLearnedWords } from './data/buildings.js';
@@ -65,6 +66,7 @@ async function bootstrap() {
 
   const app = document.getElementById('app');
   const toast = createToast();
+  const achievementsPanel = createAchievementsPanel();
 
   // 资源栏
   const resourceBar = createResourceBar(assets);
@@ -197,6 +199,7 @@ async function bootstrap() {
     }
   );
   app.appendChild(buildDrawer.element);
+  app.appendChild(achievementsPanel.element);
 
   // ─── 放置建筑（点击事件）───
   island.canvas.addEventListener('click', (e) => {
@@ -286,7 +289,14 @@ async function bootstrap() {
     location.reload();
   };
 
-  buttonBar.append(vocabBtn, buildBtn, resetBtn);
+  const achBtn = document.createElement('button');
+  achBtn.className = 'btn-pixel';
+  achBtn.textContent = '🏆 成就';
+  achBtn.onclick = () => {
+    achievementsPanel.show(data.achievements);
+  };
+
+  buttonBar.append(vocabBtn, buildBtn, achBtn, resetBtn);
   app.appendChild(buttonBar);
 
   // ─── 5. 更新资源栏 ───
