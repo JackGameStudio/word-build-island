@@ -319,14 +319,25 @@ async function bootstrap() {
   // ─── 7. 离线收入 + 打卡 ───
   // 打卡逻辑
   const today = new Date().toISOString().split('T')[0];
+  let streakReward = null;
   if (data.stats.lastActive !== today) {
     const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
     if (data.stats.lastActive === yesterday) {
       data.stats.streak = (data.stats.streak || 0) + 1;
+      // 连续打卡奖励
+      const streak = data.stats.streak;
+      if (streak >= 7) streakReward = { gold: 50, star: 2 };
+      else if (streak >= 3) streakReward = { gold: 20, star: 1 };
+      else streakReward = { gold: 5 };
     } else {
       data.stats.streak = 1;
+      streakReward = { gold: 5 };
     }
     data.stats.lastActive = today;
+    if (streakReward) {
+      data.resources = mergeResources(data.resources, streakReward);
+      resourceBar.update(data.resources, data.island.level);
+    }
   }
 
   const totalOffline = Object.values(offlineIncome).reduce((s, v) => s + v, 0);
@@ -336,7 +347,8 @@ async function bootstrap() {
     toast.show(`🕐 离线 ${timeAgo}\n收获: ${desc}`, 3000);
   }
   if (!isNewGame) {
-    toast.show(`🔥 连续打卡 ${data.stats.streak} 天！`, 2000);
+    const rewardText = streakReward ? ` 奖励: ${formatIncome(streakReward)}` : '';
+    toast.show(`🔥 连续打卡 ${data.stats.streak} 天！${rewardText}`, 2500);
   }
 
   // ─── 8. 被动收入 tick（含 Buff + 飞入动画）───
