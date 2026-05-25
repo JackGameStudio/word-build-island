@@ -347,6 +347,7 @@ async function bootstrap() {
       data.stats.tickIncomeCount = (data.stats.tickIncomeCount || 0) + 1;
       resourceBar.update(data.resources, data.island.level);
       if (breakdown.length > 0) animateTickIncome(breakdown);
+      checkAchievementsForStats();
       updateLevel();
     }
   }, ECONOMY_TICK);
