@@ -1,4 +1,4 @@
-/**
+﻿/**
  * buildings.js
  * 建筑定义 — 5 种核心建筑 + 解锁/建造检查
  * spriteIndex 对应 spritesheet.png 中的列号（0-based）
@@ -13,7 +13,7 @@ export const BUILDINGS = [
     cost: { gold: 5 },
     income: { wood: 1 },
     buff: null,
-    starRequired: 0,
+    levelRequired: 1,
     wordRequired: 0,
     tier: 0,
     description: '每6秒产出1木材'
@@ -26,7 +26,7 @@ export const BUILDINGS = [
     cost: { gold: 10 },
     income: { wood: 2 },
     buff: { type: 'woodBonus', value: 1, description: '所有木材建筑产量+1' },
-    starRequired: 0,
+    levelRequired: 1,
     wordRequired: 0,
     tier: 0,
     description: '每6秒产出2木材'
@@ -39,7 +39,7 @@ export const BUILDINGS = [
     cost: { gold: 50, wood: 20 },
     income: { gold: 1 },
     buff: { type: 'streakGold', value: 10, description: '连续3天每日+10金币' },
-    starRequired: 0,
+    levelRequired: 2,
     wordRequired: 1,
     tier: 0,
     description: '每6秒产出1金币'
@@ -52,8 +52,8 @@ export const BUILDINGS = [
     cost: { gold: 100, wood: 30 },
     income: { food: 2 },
     buff: { type: 'autoReview', value: 5, description: '每日自动复习5词' },
-    starRequired: 0,
-    wordRequired: 5,
+    levelRequired: 3,
+    wordRequired: 3,
     tier: 1,
     description: '每6秒产出2食物'
   },
@@ -62,13 +62,13 @@ export const BUILDINGS = [
     name: '采石场',
     icon: '⛏️',
     spriteIndex: 4,
-    cost: { gold: 50, wood: 20 },
-    income: { stone: 1 },
-    buff: { type: 'stoneBonus', value: 1, description: '学科学类词 stone+1' },
-    starRequired: 0,
-    wordRequired: 10,
+    cost: { gold: 200, wood: 50 },
+    income: { stone: 2 },
+    buff: { type: 'stoneBonus', value: 1, description: '所有石材建筑产量+1' },
+    levelRequired: 4,
+    wordRequired: 5,
     tier: 1,
-    description: '每6秒产出1石材'
+    description: '每6秒产出2石材'
   }
 ];
 
@@ -80,13 +80,13 @@ export function getBuildingById(id) {
  * 检查建筑是否可建造
  * @returns {{ok:boolean, reason?:string}}
  */
-export function canBuild(building, resources, stars, totalWords) {
+export function canBuild(building, resources, islandLevel, totalWords) {
   for (const [res, cost] of Object.entries(building.cost)) {
     if ((resources[res] || 0) < cost)
       return { ok: false, reason: `资源不足` };
   }
-  if (stars < building.starRequired)
-    return { ok: false, reason: `需要 ⭐${building.starRequired}` };
+  if (islandLevel < building.levelRequired)
+    return { ok: false, reason: `需要岛屿 Lv.${building.levelRequired}` };
   if (totalWords < building.wordRequired)
     return { ok: false, reason: `需要学${building.wordRequired}个词` };
   return { ok: true };

@@ -20,14 +20,14 @@ const REWARD_TABLE = {
 
 /**
  * 根据词汇复习结果返回资源奖励
- * @param {object} word — 含 box 字段
- * @param {number} quality — 0-5 评分
- * @returns {{gold?:number, wood?:number, stone?:number, food?:number, star?:number}}
+ * 答对 (quality>=3)：基础奖励 + 1 星
  */
 export function rewardForReview(word, quality) {
   const idx = quality >= 3 ? 0 : 1;
   const base = REWARD_TABLE[word.box]?.[idx] ?? { gold: 1 };
-  return { ...base };
+  const reward = { ...base };
+  if (quality >= 3) reward.star = (reward.star || 0) + 1;
+  return reward;
 }
 
 /**

@@ -16,6 +16,7 @@ import { createToast } from './components/Toast.js';
 import { transition, getState } from './core/state.js';
 import { STARTING_RESOURCES, ECONOMY_TICK, CELL_SIZE, AppState } from './data/constants.js';
 import { getBuildingById, countLearnedWords } from './data/buildings.js';
+import { checkAchievements } from './data/achievements.js';
 
 async function bootstrap() {
   // ─── 0. 预加载图片 ───
@@ -39,9 +40,16 @@ async function bootstrap() {
       resources: { ...STARTING_RESOURCES },
       vocabulary: initVocabulary(),
       island: { level: 1, buildings: [], lastOnline: Date.now() },
-      stats: { streak: 0, lastActive: new Date().toISOString().split('T')[0] }
+      stats: { streak: 0, lastActive: new Date().toISOString().split('T')[0],
+               wordsCorrect: 0, tickIncomeCount: 0 },
+      achievements: []
     };
   }
+
+  // 兼容旧存档
+  if (!data.stats.wordsCorrect) data.stats.wordsCorrect = 0;
+  if (!data.stats.tickIncomeCount) data.stats.tickIncomeCount = 0;
+  if (!data.achievements) data.achievements = [];
 
   // ─── 2. 离线收入结算 ───
   const oldLastOnline = data.island.lastOnline || Date.now();
@@ -72,10 +80,49 @@ async function bootstrap() {
   island.setBuildings(data.island.buildings);
   island.render();
 
+  // ─── 等级计算 ───
+  function calcLevel() {
+    const stars = data.resources.star || 0;
+    const bCount = data.island.buildings.length;
+    return Math.floor(stars / 5) + Math.floor(bCount / 2) + 1;
+  }
+
+  function updateLevel() {
+    const newLevel = calcLevel();
+    if (newLevel > data.island.level) {
+      data.island.level = newLevel;
+      buildDrawer.setLevel(newLevel);
+      toast.show(`🎉 岛屿升级！Lv.${newLevel}`, 2500);
+      resourceBar.update(data.resources, data.island.level);
+    }
+  }
+
+  // ─── 成就检查 ───
+  function checkAchievementsForStats() {
+    const stats = {
+      buildings: data.island.buildings.length,
+      wordsCorrect: data.stats.wordsCorrect,
+      tickIncomeCount: data.stats.tickIncomeCount
+    };
+    const newAchs = checkAchievements(stats, data.achievements);
+    newAchs.forEach(a => {
+      data.achievements.push(a.id);
+      toast.show(`${a.icon} 成就解锁: ${a.name}！\n${a.desc}`, 3000);
+      if (a.reward) {
+        data.resources = mergeResources(data.resources, a.reward);
+        resourceBar.update(data.resources, data.island.level);
+      }
+    });
+    updateLevel();
+  }
+
   // 背词覆盖层
   const vocabOverlay = createVocabOverlay(assets, data.vocabulary, (rewards) => {
     data.resources = mergeResources(data.resources, rewards);
     resourceBar.update(data.resources, data.island.level);
+    // 统计答对数（rewards 里的 star 来自正确答题）
+    if (rewards.star) data.stats.wordsCorrect = (data.stats.wordsCorrect || 0) + 1;
+    checkAchievementsForStats();
     saveGameData(data);
   });
   vocabOverlay.setToast(toast);
@@ -133,7 +180,7 @@ async function bootstrap() {
   });
 
   const buildDrawer = createBuildDrawer(
-    assets, data.resources, data.vocabulary, island,
+    assets, data.resources, data.vocabulary, data.island.level, island,
     (building) => {
       // 选择建筑 → 进入预览模式
       transition(AppState.PREVIEW);
@@ -185,7 +232,7 @@ async function bootstrap() {
     resourceBar.update(data.resources, data.island.level);
     toast.show(`${previewBuilding.icon} ${previewBuilding.name} 建成！`);
     saveGameData(data);
-
+    checkAchievementsForStats();
     cancelPreview();
   });
 
@@ -280,8 +327,10 @@ async function bootstrap() {
     const { income, breakdown } = tickIncomeWithBuffs(data.island.buildings, data.stats);
     if (Object.keys(income).length > 0) {
       data.resources = mergeResources(data.resources, income);
+      data.stats.tickIncomeCount = (data.stats.tickIncomeCount || 0) + 1;
       resourceBar.update(data.resources, data.island.level);
       if (breakdown.length > 0) animateTickIncome(breakdown);
+      updateLevel();
     }
   }, ECONOMY_TICK);
 
