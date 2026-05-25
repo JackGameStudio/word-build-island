@@ -65,7 +65,16 @@ export function createBuildDrawer(assets, getResources, vocab, islandLevel, isla
       const check = canBuild(building, getResources(), localLevel, totalWords);
       if (!check.ok) {
         btn.classList.add('disabled');
-        btn.textContent = '🔒';
+        // 资源不足 → 显示缺什么；等级/词不足 → 显示 🔒
+        if (check.reason === '资源不足') {
+          const missing = Object.entries(building.cost)
+            .filter(([res, cost]) => (getResources()[res] || 0) < cost)
+            .map(([res]) => res === 'gold' ? '🪙' : res === 'wood' ? '🪵' : res === 'stone' ? '🪨' : res === 'food' ? '🌾' : res)
+            .join('');
+          btn.textContent = `缺${missing}`;
+        } else {
+          btn.textContent = '🔒';
+        }
         btn.title = check.reason;
       }
 
