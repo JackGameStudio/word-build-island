@@ -40,7 +40,7 @@ export const BUILDINGS = [
     income: { gold: 1 },
     buff: { type: 'streakGold', value: 10, description: '连续3天每日+10金币' },
     levelRequired: 2,
-    wordRequired: 1,
+    wordRequired: 0,
     tier: 0,
     description: '每6秒产出1金币'
   },
@@ -53,7 +53,7 @@ export const BUILDINGS = [
     income: { food: 2 },
     buff: { type: 'autoReview', value: 5, description: '每日自动复习5词' },
     levelRequired: 3,
-    wordRequired: 3,
+    wordRequired: 0,
     tier: 1,
     description: '每6秒产出2食物'
   },
@@ -66,7 +66,7 @@ export const BUILDINGS = [
     income: { stone: 2 },
     buff: { type: 'stoneBonus', value: 1, description: '所有石材建筑产量+1' },
     levelRequired: 4,
-    wordRequired: 5,
+    wordRequired: 0,
     tier: 1,
     description: '每6秒产出2石材'
   }
