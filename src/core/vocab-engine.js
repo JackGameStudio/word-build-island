@@ -8,10 +8,16 @@ import { WORD_BANK } from '../data/vocabulary.js';
 import { REVIEW_INTERVALS } from '../data/constants.js';
 
 export function initVocabulary() {
-  return WORD_BANK.map(w => ({
+  const seen = new Set();
+  return WORD_BANK.filter(w => {
+    const key = `${w.word}|${w.meaning}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).map(w => ({
     ...w,
     box: 1,
-    ef: 2.5,
+    ef: 1.0,
     nextReview: null,
     learnedAt: null,
     timesReviewed: 0,
@@ -23,10 +29,9 @@ export function getDueWords(vocab, now = Date.now()) {
   return vocab.filter(w => w.nextReview === null || w.nextReview <= now);
 }
 
-export function gradeWord(word, quality) {
+export function gradeWord(word, quality, now = Date.now()) {
   let newEf = word.ef + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
-  newEf = Math.max(1.3, newEf);
-  const now = Date.now();
+  newEf = Math.max(1.0, newEf);
 
   if (quality < 3) {
     return {

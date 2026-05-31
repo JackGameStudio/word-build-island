@@ -10,7 +10,7 @@ import { drawSprite, drawTerrainTile } from './asset-loader.js';
 /** 不可建造的地形类型 */
 const BLOCKED_TERRAIN = new Set([TERRAIN.WATER, TERRAIN.STONE]);
 
-export function createIslandEngine(container, assets) {
+export function createIslandEngine(container, assets, pickupSystem = null, customAssets = null) {
   const G = ISLAND_GRID_SIZE;
   const S = CELL_SIZE;
 
@@ -109,6 +109,11 @@ export function createIslandEngine(container, assets) {
       ctx.lineWidth = 2;
       ctx.strokeRect(gx * S + 1, gy * S + 1, S - 2, S - 2);
       ctx.lineWidth = 1;
+    }
+
+    // ─── 拾取物层 ───
+    if (pickupSystem) {
+      pickupSystem.render(ctx, offsetX, offsetY, S, performance.now());
     }
 
     ctx.restore();
@@ -254,7 +259,16 @@ export function createIslandEngine(container, assets) {
 
     isOccupied(gx, gy) {
       return buildings.some(b => b.x === gx && b.y === gy);
-    }
+    },
+
+    /** 拾取物命中测试 */
+    hitTestPickup(sx, sy) {
+      if (!pickupSystem) return null;
+      return pickupSystem.hitTest(sx, sy, offsetX, offsetY, S);
+    },
+
+    getOffset() { return { x: offsetX, y: offsetY }; },
+    getPickupSystem() { return pickupSystem; }
   };
 
   return island;

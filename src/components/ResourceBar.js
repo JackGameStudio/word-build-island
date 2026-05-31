@@ -10,8 +10,7 @@ const ICONS = [
   { key: 'star',  label: '星星', col: 0 },
   { key: 'gold',  label: '金币', col: 1 },
   { key: 'wood',  label: '木材', col: 2 },
-  { key: 'stone', label: '石材', col: 3 },
-  { key: 'food',  label: '食物', col: 4 }
+  { key: 'stone', label: '石材', col: 3 }
 ];
 
 export function createResourceBar(assets) {
@@ -37,7 +36,7 @@ export function createResourceBar(assets) {
       drawIcon(ictx, assets.icons, col, 0, 0);
     } else {
       // fallback: 彩色点
-      const colors = ['#FFD700','#FFD700','#8B4513','#808080','#228B22'];
+      const colors = ['#FFD700','#FFD700','#8B4513','#808080'];
       ictx.fillStyle = colors[col];
       ictx.fillRect(4, 4, 16, 16);
     }

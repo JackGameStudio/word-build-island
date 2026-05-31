@@ -8,10 +8,11 @@ import { AppState } from '../data/constants.js';
 let state = AppState.IDLE;
 
 const transitions = {
-  [AppState.IDLE]:    [AppState.VOCAB, AppState.BUILD],
+  [AppState.IDLE]:    [AppState.VOCAB, AppState.BUILD, AppState.CHEST],
   [AppState.VOCAB]:   [AppState.IDLE],
   [AppState.BUILD]:   [AppState.PREVIEW, AppState.IDLE],
-  [AppState.PREVIEW]: [AppState.IDLE]
+  [AppState.PREVIEW]: [AppState.IDLE],
+  [AppState.CHEST]:   [AppState.IDLE]
 };
 
 export function getState() {

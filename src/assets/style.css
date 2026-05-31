@@ -46,27 +46,39 @@ html, body {
   background: var(--color-surface);
 }
 
-/* ─── 图片按钮（三态） ─── */
+/* ─── 9-slice 按钮（四态） ─── */
 .btn-pixel {
   display: inline-flex;
   align-items: center; justify-content: center;
-  padding: 8px 16px;
-  min-width: 120px; min-height: 36px;
-  border: none;
-  background: url('/src/assets/images/btn-normal.png') center / 100% 100% no-repeat;
+  padding: 6px 14px;
+  border-style: solid;
+  border-color: transparent;
+  border-width: 8px;
+  border-image-source: url('/src/assets/images/btn-green-9slice.png');
+  border-image-slice: 8 fill;
+  border-image-width: 8px;
   color: var(--color-text);
   font-family: var(--pixel-font);
   font-size: 13px;
   cursor: pointer;
   image-rendering: pixelated;
   transition: transform var(--transition-fast);
+  background: none;
 }
-.btn-pixel:hover  { background-image: url('/src/assets/images/btn-hover.png'); }
+.btn-pixel:hover  {
+  border-image-source: url('/src/assets/images/btn-green-hover-9slice.png');
+}
 .btn-pixel:active { transform: scale(0.95); }
 .btn-pixel.disabled {
-  background-image: url('/src/assets/images/btn-disabled.png');
-  opacity: 0.5;
+  border-image-source: url('/src/assets/images/btn-disable-9slice.png');
+  opacity: 0.8;
   pointer-events: none;
+}
+.btn-danger {
+  border-image-source: url('/src/assets/images/btn-read-9slice.png') !important;
+}
+.btn-danger:hover {
+  border-image-source: url('/src/assets/images/btn-read-9slice.png') !important;
 }
 
 /* ─── 资源栏 ─── */
@@ -126,6 +138,30 @@ html, body {
   transform: translateY(0);
 }
 
+/* ─── 宝箱面板：强制贴底 ─── */
+.chest-panel.slide-panel {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  max-height: 35vh !important;
+  margin: 0 auto !important;
+  border-bottom-left-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+}
+
+/* ─── Roadmap 面板：强制贴底 ─── */
+.roadmap-panel.slide-panel {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  max-height: 60vh !important;
+  margin: 0 auto !important;
+  border-bottom-left-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+}
+
 /* ─── 背词面板 ─── */
 .vocab-panel {
   padding: 16px;
@@ -140,6 +176,32 @@ html, body {
 .vocab-options {
   display: grid; grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+/* ─── 排字游戏字母方块 ─── */
+.spell-tile {
+  width: 36px; height: 36px;
+  padding: 0;
+  font-family: var(--pixel-font);
+  font-size: 18px; font-weight: 700;
+  text-transform: lowercase;
+  border: 2px solid #555;
+  background: var(--color-accent, #6c63ff);
+  color: #fff;
+  cursor: pointer;
+  transition: transform 0.1s ease, background 0.15s ease;
+  image-rendering: crisp-edges;
+  display: flex; align-items: center; justify-content: center;
+}
+.spell-tile:hover {
+  transform: scale(1.1);
+  border-color: var(--color-correct);
+}
+.spell-tile:active {
+  transform: scale(0.9);
+}
+.spell-tile--pool {
+  background: var(--color-surface, #2d2d44);
 }
 
 /* ─── 动画 ─── */

@@ -8,7 +8,7 @@ import { canAfford } from '../core/economy.js';
 import { getState, transition } from '../core/state.js';
 import { AppState } from '../data/constants.js';
 
-export function createBuildDrawer(assets, getResources, vocab, islandLevel, island, onBuild) {
+export function createBuildDrawer(assets, getResources, getStars, vocab, islandLevel, island, onBuild) {
   let localLevel = islandLevel;
   let totalWords = countLearnedWords(vocab);
 
@@ -39,22 +39,24 @@ export function createBuildDrawer(assets, getResources, vocab, islandLevel, isla
   // ─── 渲染建筑列表 ───
   function render() {
     totalWords = countLearnedWords(vocab);
+    const stars = getStars ? getStars() : 0;
     grid.innerHTML = '';
 
     BUILDINGS.forEach(building => {
       const row = document.createElement('div');
-      row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 0;';
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 0;';;
 
-      // 图标 + 名称
+      // 图标 + 名称 + ⭐需求
       const info = document.createElement('div');
       info.style.cssText = 'flex:1;min-width:0;';
       const lvTag = building.levelRequired > 1 ? ` <span style="font-size:9px;color:#fbbf24;">Lv.${building.levelRequired}</span>` : '';
-      info.innerHTML = `${building.icon} <b>${building.name}</b>${lvTag} <span style="font-size:10px;color:var(--color-muted);">${building.description}</span>`;
+      const starTag = building.starRequired > 0 ? ` <span style="font-size:9px;color:#fbbf24;">⭐${building.starRequired}</span>` : '';
+      info.innerHTML = `${building.icon} <b>${building.name}</b>${lvTag}${starTag} <span style="font-size:10px;color:var(--color-muted);">${building.description}</span>`;
 
-      // 花费
+      // 花费（含 ⭐）
       const costEl = document.createElement('div');
-      costEl.style.cssText = 'font-size:10px;color:var(--color-muted);min-width:60px;';
-      costEl.textContent = formatCost(building.cost);
+      costEl.style.cssText = 'font-size:10px;color:var(--color-muted);min-width:80px;';
+      costEl.textContent = formatCost(building.cost, building.starRequired);
 
       // 建造按钮
       const btn = document.createElement('button');
@@ -62,14 +64,14 @@ export function createBuildDrawer(assets, getResources, vocab, islandLevel, isla
       btn.textContent = '建造';
       btn.style.cssText = 'font-size:11px;padding:4px 10px;min-width:auto;';
 
-      const check = canBuild(building, getResources(), localLevel, totalWords);
+      const check = canBuild(building, getResources(), localLevel, totalWords, stars);
       if (!check.ok) {
         btn.classList.add('disabled');
         // 资源不足 → 显示缺什么；等级/词不足 → 显示 🔒
         if (check.reason === '资源不足') {
           const missing = Object.entries(building.cost)
             .filter(([res, cost]) => (getResources()[res] || 0) < cost)
-            .map(([res]) => res === 'gold' ? '🪙' : res === 'wood' ? '🪵' : res === 'stone' ? '🪨' : res === 'food' ? '🌾' : res)
+            .map(([res]) => res === 'gold' ? '🪙' : res === 'wood' ? '🪵' : res === 'stone' ? '🪨' : res)
             .join('');
           btn.textContent = `缺${missing}`;
         } else {
@@ -91,9 +93,11 @@ export function createBuildDrawer(assets, getResources, vocab, islandLevel, isla
 
   function setLevel(lv) { localLevel = lv; titleEl.textContent = `建造  Lv.${lv}`; }
 
-  function formatCost(cost) {
-    const icons = { gold: '🪙', wood: '🪵', stone: '🪨', food: '🌾' };
-    return Object.entries(cost).map(([k, v]) => `${icons[k]}${v}`).join(' ');
+  function formatCost(cost, starReq) {
+    const icons = { gold: '🪙', wood: '🪵', stone: '🪨' };
+    let s = Object.entries(cost).map(([k, v]) => `${icons[k]}${v}`).join(' ');
+    if (starReq > 0) s += ` ⭐${starReq}`;
+    return s;
   }
 
   // ─── 事件 ───

@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🏝️ Island Map Editor</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Silkscreen&display=swap');
+:root {
+  --bg:#0f0f1a; --surface:#1a1a2e; --surface2:#252540; --border:#3a3a5c;
+  --text:#e2e8f0; --muted:#8892a8; --accent:#6c63ff;
+  --green:#4ade80; --red:#f87171; --yellow:#f59e0b;
+  --font:'Silkscreen',monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--font);height:100vh;overflow:hidden;display:flex;flex-direction:column}
+.topbar{height:40px;background:var(--surface);border-bottom:2px solid var(--border);display:flex;align-items:center;padding:0 12px;gap:10px;flex-shrink:0;z-index:10;font-size:11px}
+.topbar-title{color:var(--accent);white-space:nowrap}
+.topbar-sep{width:1px;height:20px;background:var(--border)}
+.topbar-coord{color:var(--muted)}
+.topbar-mode{color:var(--yellow);display:none;padding:1px 6px;background:var(--surface2)}
+.topbar-info{margin-left:auto;color:var(--muted)}
+.topbar-info b{color:var(--green)}
+.main{flex:1;display:flex;overflow:hidden}
+.sidebar{width:220px;background:var(--surface);border-right:2px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;flex-shrink:0}
+.sidebar-right{width:200px;border-right:none;border-left:2px solid var(--border)}
+.sidebar-title{font-size:10px;color:var(--muted);padding:8px 8px 4px;text-transform:uppercase}
+.terrain-item,.building-item{padding:6px 8px;display:flex;align-items:center;gap:6px;cursor:pointer;border:2px solid transparent;font-size:9px;margin:2px 4px;border-radius:3px}
+.terrain-item:hover,.building-item:hover{background:var(--surface2)}
+.terrain-item.active{border-color:var(--accent);background:var(--surface2)}
+.terrain-icon{font-size:14px}
+.building-item .cfg-btn{opacity:0;margin-left:auto;font-size:12px;cursor:pointer;padding:0 4px}
+.building-item:hover .cfg-btn{opacity:1}
+.tile-picker{display:none;padding:4px 8px;background:var(--surface2);margin:0 4px 6px;border-radius:3px}
+.tile-picker.active{display:block}
+.tile-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;margin-top:4px}
+.tile-cell{width:100%;aspect-ratio:1;border:2px solid transparent;cursor:pointer;image-rendering:pixelated}
+.tile-cell:hover{border-color:var(--accent)}
+.tile-cell.selected{border-color:var(--green)}
+.tool-section{padding:6px 8px;border-top:1px solid var(--border);margin-top:4px;font-size:9px}
+.tool-btn,.action-btn{display:block;width:100%;margin:3px 0;padding:5px 8px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-family:var(--font);font-size:9px;cursor:pointer;text-align:left}
+.tool-btn:hover,.action-btn:hover{background:var(--border)}
+.canvas-wrap{flex:1;overflow:hidden;position:relative;background:#1c1c2e}
+canvas{display:block;image-rendering:pixelated}
+.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:100;align-items:center;justify-content:center}
+.modal-inner{background:var(--surface);border:2px solid var(--border);padding:16px;width:380px;max-height:80vh;overflow-y:auto;font-size:10px;display:flex;flex-direction:column;gap:8px}
+.modal-inner label{color:var(--muted);font-size:9px}
+.modal-inner input[type=file]{font-size:9px;font-family:var(--font)}
+.modal-inner input[type=number],.modal-inner input[type=text]{background:var(--surface2);border:1px solid var(--border);color:var(--text);font-family:var(--font);font-size:9px;padding:4px;width:100%}
+.modal-inner select{background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:9px;padding:4px;font-family:var(--font)}
+.btn-row{display:flex;gap:6px;margin-top:6px}
+.btn-primary{background:var(--accent);color:#fff;border:none;padding:6px 12px;font-family:var(--font);font-size:9px;cursor:pointer}
+.btn-secondary{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 12px;font-family:var(--font);font-size:9px;cursor:pointer}
+.btn-danger{background:transparent;border:1px solid var(--red);color:var(--red);padding:6px 12px;font-family:var(--font);font-size:9px;cursor:pointer}
+.btn-danger:disabled{opacity:0.3;cursor:default}
+.preview-box{width:64px;height:64px;border:2px dashed var(--border);cursor:pointer;image-rendering:pixelated;display:block;margin:4px 0}
+.tile-preview-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;width:192px;margin:4px auto}
+.tile-preview-grid canvas{width:64px;height:64px;border:1px solid var(--border);image-rendering:pixelated}
+.color-row{display:flex;gap:8px;align-items:center}
+.color-swatch{width:24px;height:24px;border:1px solid var(--border);border-radius:3px}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--accent);color:#fff;padding:6px 16px;font-size:10px;pointer-events:none;z-index:200;opacity:0;transition:opacity .2s}
+.toast.show{opacity:1}
+.offset-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+/* scrollbar */
+.sidebar::-webkit-scrollbar{width:4px}.sidebar::-webkit-scrollbar-thumb{background:var(--border)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="topbar-title">🏝️ Map Editor</span>
+  <span class="topbar-sep"></span>
+  <span class="topbar-coord" id="coord">0,0</span>
+  <span class="topbar-sep"></span>
+  <span class="topbar-mode" id="mode-tag">🖌 绘制</span>
+  <span class="topbar-sep"></span>
+  <span class="topbar-info">可建<b id="info-buildable">0</b>格 &nbsp; 建筑<b id="info-built">0</b> &nbsp; ↩<b id="undo-count">0</b></span>
+</div>
+
+<div class="main">
+  <!-- 左：地形面板 -->
+  <div class="sidebar" id="left-sidebar"></div>
+
+  <!-- 中：画布 -->
+  <div class="canvas-wrap" id="canvas-wrap">
+    <canvas id="cv"></canvas>
+  </div>
+
+  <!-- 右：建筑面板 -->
+  <div class="sidebar sidebar-right" id="right-sidebar"></div>
+</div>
+
+<div class="modal" id="modal"><div class="modal-inner" id="modal-inner"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ═══════════════════════ STATE ═══════════════════════
+let GRID = 20;
+const CELL = 64;
+let W = GRID * CELL, H = GRID * CELL;
+
+const TERRAIN = { GRASS:0, SAND:1, WATER:2, FOREST:3, STONE:4 };
+
+// 编码：cell = type << 4 | variant (variant 只对 tileset 有意义)
+const ENC_SHIFT = 4, ENC_MASK = 0xF;
+function enc(type, variant) { return (type << ENC_SHIFT) | (variant & ENC_MASK); }
+function dec(val) { return { type: val >> ENC_SHIFT, variant: val & ENC_MASK }; }
+
+// ── 地形配置 ──
+// mode: 'tileset' (9 tiles from 192×192) | 'single' (1 tile 64×64) | 'color'
+const defaultTerrainConfigs = [
+  { id:0, name:'草地', icon:'🌿', buildable:true,  mode:'tileset', tiles:[], color:'#4a7c4f' },
+  { id:1, name:'沙滩', icon:'🏖️', buildable:false, mode:'tileset', tiles:[], color:'#d4b483' },
+  { id:2, name:'海水', icon:'🌊', buildable:false, mode:'color',   tiles:[], color:'#1a5276' },
+  { id:3, name:'森林', icon:'🌲', buildable:true,  mode:'single',  tiles:[], color:'#2d5a27' },
+  { id:4, name:'石头', icon:'🪨', buildable:true,  mode:'single',  tiles:[], color:'#7f8c8d' },
+];
+
+// ── 建筑配置 ──
+const defaultBuildingConfigs = [
+  { id:'tree',      name:'树',     icon:'🌳', spriteIndex:0 },
+  { id:'lumberjack',name:'伐木工', icon:'🪓', spriteIndex:1 },
+  { id:'cottage',   name:'小屋',   icon:'🏡', spriteIndex:2 },
+  { id:'garden',    name:'花园',   icon:'🌻', spriteIndex:3 },
+  { id:'quarry',    name:'采石场', icon:'⛏️', spriteIndex:4 },
+  { id:'dock',      name:'码头',   icon:'⚓', spriteIndex:5 },
+  { id:'deepMine',  name:'深矿',   icon:'💎', spriteIndex:6 },
+  { id:'market',    name:'市场',   icon:'🏪', spriteIndex:7 },
+  { id:'lighthouse',name:'灯塔',   icon:'🗼', spriteIndex:8 },
+  { id:'townPlaza', name:'广场',   icon:'🏛️', spriteIndex:9 },
+  { id:'factory',   name:'工厂',   icon:'🏭', spriteIndex:10 },
+  { id:'castle',    name:'城堡',   icon:'🏰', spriteIndex:11 },
+].map(b => ({ ...b, image:null, spriteW:64, spriteH:64, gridW:1, gridH:1, offsetX:0, offsetY:0 }));
+
+// 特殊尺寸建筑
+const _sizes = {
+  castle:      { spriteW: 192, spriteH: 192, gridW: 2, gridH: 2 },
+  lighthouse:  { spriteW: 64,  spriteH: 128, gridW: 1, gridH: 2 },
+};
+for (const b of defaultBuildingConfigs) if (_sizes[b.id]) Object.assign(b, _sizes[b.id]);
+
+// ── 运行时 ──
+let map = [];              // GRID×GRID encoded ints
+let buildCells = [];       // {id,x,y}
+let selectedTool = 'brush'; // brush | eraser | building
+let selectedTerrain = 0;
+let selectedVariant = 0;
+let selectedBuildingId = null;
+let panX = 0, panY = 0;
+let zoom = 1;
+let pointerMode = null; // 'draw' | 'pan' | null
+let undoStack = [];
+let panStart = { x:0, y:0 }, panOrig = { x:0, y:0 };
+let pointers = new Map();
+
+let terrainCfgs = structuredClone(defaultTerrainConfigs);
+let buildingCfgs = structuredClone(defaultBuildingConfigs);
+let imgCache = {}; // key → Image
+
+// ── 持久化 key ──
+function loadConfigs() {
+  try {
+    const t = localStorage.getItem('editorTerrainConfigs2');
+    const b = localStorage.getItem('editorBuildingConfigs2');
+    if (t) terrainCfgs = JSON.parse(t);
+    if (b) buildingCfgs = JSON.parse(b);
+  } catch(e) {}
+}
+function saveConfigs() {
+  // 存不含 Image 的版本（只有 dataURL）
+  localStorage.setItem('editorTerrainConfigs2', JSON.stringify(terrainCfgs));
+  localStorage.setItem('editorBuildingConfigs2', JSON.stringify(buildingCfgs));
+}
+
+// ── 地图数据 ──
+function loadMap() {
+  try {
+    const raw = localStorage.getItem('editorMap2');
+    if (raw) { map = JSON.parse(raw); return true; }
+  } catch(e) {}
+  return false;
+}
+function saveMap() { localStorage.setItem('editorMap2', JSON.stringify(map)); }
+function loadBuildings() {
+  try {
+    const raw = localStorage.getItem('editorBuildings2');
+    if (raw) { buildCells = JSON.parse(raw); return true; }
+  } catch(e) {}
+  return false;
+}
+function saveBuildings() { localStorage.setItem('editorBuildings2', JSON.stringify(buildCells)); }
+
+// ── 初始化 ──
+async function init() {
+  loadConfigs();
+  if (!loadMap()) { initDefaultMap(); }
+  loadBuildings();
+  await loadAllCachedImages();
+  refreshLeftSidebar();
+  refreshRightSidebar();
+  setupCanvas();
+  render();
+  updateInfo();
+}
+
+function initDefaultMap() {
+  map = [];
+  for (let y = 0; y < GRID; y++) {
+    map[y] = [];
+    for (let x = 0; x < GRID; x++) {
+      if (x >= 3 && x <= 16 && y >= 3 && y <= 16) {
+        map[y][x] = enc(TERRAIN.GRASS, (x + y) % 2);
+      } else if (x >= 2 && x <= 17 && y >= 2 && y <= 17) {
+        map[y][x] = enc(TERRAIN.SAND, (x + y) % 2);
+      } else {
+        map[y][x] = enc(TERRAIN.WATER, 0);
+      }
+    }
+  }
+}
+
+function resizeMap(newSize) {
+  const old = map;
+  const water = enc(TERRAIN.WATER, 0);
+  map = [];
+  for (let y = 0; y < newSize; y++) {
+    map[y] = [];
+    for (let x = 0; x < newSize; x++) {
+      map[y][x] = (old[y]?.[x] != null) ? old[y][x] : water;
+    }
+  }
+  GRID = newSize;
+  W = H = GRID * CELL;
+  if (ctx) { ctx.canvas.width = W; ctx.canvas.height = H; }
+  // 剔除地图外的建筑
+  buildCells = buildCells.filter(b => b.x < newSize && b.y < newSize);
+}
+
+// ── 图片缓存 ──
+async function fileToDataUrl(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+
+function dataUrlToImg(src) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = rej;
+    img.src = src;
+  });
+}
+
+async function loadAllCachedImages() {
+  for (const c of terrainCfgs) {
+    if (c.tiles && c.tiles.length > 0) {
+      const imgs = [];
+      for (let i = 0; i < c.tiles.length; i++) {
+        if (c.tiles[i]) imgs[i] = await dataUrlToImg(c.tiles[i]).catch(() => null);
+      }
+      imgCache['terrain_' + c.id] = imgs;
+    }
+  }
+  for (const b of buildingCfgs) {
+    if (b.image) {
+      imgCache['building_' + b.id] = await dataUrlToImg(b.image).catch(() => null);
+    }
+  }
+}
+
+// ── 切片 192×192 → 9 × 64×64 tiles ──
+function sliceTileset(sourceImg) {
+  const tiles = [];
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 3; col++) {
+      const c = document.createElement('canvas');
+      c.width = 64; c.height = 64;
+      const ctx = c.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(sourceImg, col * 64, row * 64, 64, 64, 0, 0, 64, 64);
+      tiles.push(c.toDataURL());
+    }
+  }
+  return tiles;
+}
+
+async function sliceAndCache(terrainId, dataUrl) {
+  const img = await dataUrlToImg(dataUrl);
+  if (!img) return null;
+  const tiles = sliceTileset(img);
+  const c = terrainCfgs.find(t => t.id === terrainId);
+  c.tiles = tiles;
+  const imgs = [];
+  for (const t of tiles) imgs.push(await dataUrlToImg(t).catch(() => null));
+  imgCache['terrain_' + terrainId] = imgs;
+  saveConfigs();
+  return imgs;
+}
+
+// ── Canvas ──
+let cv, ctx, animated = false;
+function setupCanvas() {
+  cv = document.getElementById('cv');
+  ctx = cv.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  cv.width = W; cv.height = H;
+  const wrap = document.getElementById('canvas-wrap');
+
+  // 初始自适应缩放
+  zoom = Math.min(0.5, (wrap.offsetWidth - 40) / W, (wrap.offsetHeight - 40) / H);
+
+  // 滚轮缩放/平移
+  wrap.addEventListener('wheel', e => {
+    e.preventDefault();
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl+滚轮 → 缩放
+      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      const newZoom = Math.min(3, Math.max(0.1, zoom * delta));
+      const r = wrap.getBoundingClientRect();
+      const mx = e.clientX - r.left, my = e.clientY - r.top;
+      panX = mx - (mx - panX) / zoom * newZoom;
+      panY = my - (my - panY) / zoom * newZoom;
+      zoom = newZoom;
+    } else {
+      panX -= e.deltaX; panY -= e.deltaY;
+    }
+    render();
+  }, { passive: false });
+
+  // 指针事件
+  wrap.addEventListener('pointerdown', e => {
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (e.button === 1 || pointers.size === 2) {
+      // 中键 或 双指 → 拖拽画布
+      pointerMode = 'pan';
+      const pts = [...pointers.values()];
+      panStart = pointers.size === 2
+        ? { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 }
+        : { x: e.clientX, y: e.clientY };
+      panOrig = { x: panX, y: panY };
+    } else {
+      // 左键 → 画图
+      pointerMode = 'draw';
+      pushUndo();
+      panStart = { x: e.clientX, y: e.clientY };
+    }
+    wrap.setPointerCapture(e.pointerId);
+  });
+
+  wrap.addEventListener('pointermove', e => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointerMode === 'pan') {
+      if (pointers.size === 2) {
+        const pts = [...pointers.values()];
+        const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+        panX = panOrig.x + mid.x - panStart.x;
+        panY = panOrig.y + mid.y - panStart.y;
+      } else {
+        panX = panOrig.x + e.clientX - panStart.x;
+        panY = panOrig.y + e.clientY - panStart.y;
+      }
+      render();
+      return;
+    }
+
+    // draw mode: 连续绘制 + 更新坐标
+    const { gx, gy } = screenToGrid(e.clientX, e.clientY);
+    document.getElementById('coord').textContent = `${gx},${gy}`;
+    wakeDraw(e);
+  });
+
+  wrap.addEventListener('pointerup', e => {
+    pointers.delete(e.pointerId);
+    if (pointerMode === 'draw' && pointers.size === 0) {
+      handleClick(e);
+    }
+    if (pointers.size === 0) pointerMode = null;
+    wrap.releasePointerCapture(e.pointerId);
+  });
+
+  wrap.addEventListener('pointercancel', e => {
+    pointers.delete(e.pointerId);
+    if (pointers.size === 0) pointerMode = null;
+  });
+
+  // Ctrl+Z 撤销
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.target.closest('input')) {
+      e.preventDefault();
+      if (undoStack.length === 0) { toast('没有可撤销的操作'); return; }
+      const snapshot = undoStack.pop();
+      map = snapshot.map;
+      buildCells = snapshot.buildCells;
+      saveMap(); saveBuildings(); render();
+      toast(`↩ 已撤销 (剩余 ${undoStack.length})`);
+      document.getElementById('undo-count').textContent = undoStack.length;
+    }
+  });
+
+  // 右键擦除
+  wrap.addEventListener('contextmenu', e => { e.preventDefault(); wakeRightErase(e); });
+}
+
+function screenToGrid(cx, cy) {
+  const r = document.getElementById('canvas-wrap').getBoundingClientRect();
+  const sx = cx - r.left, sy = cy - r.top;
+  return { gx: Math.floor((sx - panX) / (CELL * zoom)), gy: Math.floor((sy - panY) / (CELL * zoom)) };
+}
+
+function gridToScreen(gx, gy) {
+  return { x: gx * CELL + panX, y: gy * CELL + panY };
+}
+
+function render() {
+  if (!ctx) return;
+  ctx.clearRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(panX, panY);
+  ctx.scale(zoom, zoom);
+
+  // 地形
+  for (let y = 0; y < GRID; y++) {
+    for (let x = 0; x < GRID; x++) {
+      const { type, variant } = dec(map[y]?.[x] ?? 0);
+      const dx = x * CELL, dy = y * CELL;
+      const m = terrainCfgs[type]?.mode;
+
+      if (m === 'tileset' || m === 'single') {
+        // 先填底色再画图，避免透明区域变黑
+        fillFallback(type, dx, dy);
+        const imgs = imgCache['terrain_' + type];
+        const idx = m === 'tileset' ? (variant % (imgs?.length || 1)) : 0;
+        const img = imgs?.[idx];
+        if (img) ctx.drawImage(img, dx, dy, CELL, CELL);
+      } else {
+        // color
+        ctx.fillStyle = terrainCfgs[type]?.color || '#333';
+        ctx.fillRect(dx, dy, CELL, CELL);
+      }
+    }
+  }
+
+  // 建筑（按 y 排序，大的在下 = 在前）
+  const sorted = [...buildCells].sort((a, b) => {
+    const cfgA = buildingCfgs.find(c => c.id === a.id) || { gridH: 1 };
+    const cfgB = buildingCfgs.find(c => c.id === b.id) || { gridH: 1 };
+    return (a.y + (cfgA.gridH || 1)) - (b.y + (cfgB.gridH || 1));
+  });
+  for (const b of sorted) {
+    const cfg = buildingCfgs.find(c => c.id === b.id) || {};
+    const dx = b.x * CELL, dy = b.y * CELL;
+    const img = imgCache['building_' + b.id];
+    const ofx = cfg.offsetX || 0;
+    const ofy = cfg.offsetY || 0;
+    if (img) {
+      const gw = cfg.gridW || 1, gh = cfg.gridH || 1;
+      ctx.drawImage(img, dx + ofx, dy + ofy - (img.naturalHeight || CELL * gh) + CELL * gh, img.naturalWidth || CELL * gw, img.naturalHeight || CELL * gh);
+    } else {
+      const gw = cfg.gridW || 1, gh = cfg.gridH || 1;
+      ctx.fillStyle = '#8B4513';
+      ctx.fillRect(dx + 4, dy + 4, CELL * gw - 8, CELL * gh - 8);
+      ctx.font = '16px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(cfg.icon || '🏠', dx + CELL / 2, dy + CELL / 2);
+    }
+  }
+
+  // 格子线
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 0.5;
+  for (let i = 0; i <= GRID; i++) {
+    ctx.beginPath(); ctx.moveTo(i * CELL, 0); ctx.lineTo(i * CELL, H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, i * CELL); ctx.lineTo(W, i * CELL); ctx.stroke();
+  }
+
+  ctx.restore();
+  updateInfo();
+}
+
+function fillFallback(type, dx, dy) {
+  const colors = ['#4a7c4f','#d4b483','#2980b9','#2d5a27','#7f8c8d'];
+  ctx.fillStyle = colors[type] || '#333';
+  ctx.fillRect(dx, dy, CELL, CELL);
+}
+
+function updateInfo() {
+  let buildable = 0;
+  for (let y = 0; y < GRID; y++) {
+    for (let x = 0; x < GRID; x++) {
+      const { type } = dec(map[y]?.[x] ?? 0);
+      const blocked = new Set([TERRAIN.WATER, TERRAIN.STONE]);
+      if (!blocked.has(type) && !buildCells.some(b => b.x === x && b.y === y)) buildable++;
+    }
+  }
+  document.getElementById('info-buildable').textContent = buildable;
+  document.getElementById('info-built').textContent = buildCells.length;
+}
+
+// ── 点击/绘制 ──
+function pushUndo() {
+  undoStack.push({
+    map: map.map(row => [...row]),
+    buildCells: buildCells.map(b => ({...b})),
+  });
+  if (undoStack.length > 100) undoStack.shift();
+}
+
+let lastPaint = 0, paintBatch = null;
+function wakeDraw(e) {
+  if (selectedTool === 'building') return;
+  const { gx, gy } = screenToGrid(e.clientX, e.clientY);
+  if (gx < 0 || gx >= GRID || gy < 0 || gy >= GRID) return;
+  // 每次操作推一次 undo（从画 click/右键擦时开始，拖动连续画不再重复推）
+  if (selectedTool === 'eraser') paintCell(gx, gy, TERRAIN.WATER, 0);
+  else paintCell(gx, gy, selectedTerrain, selectedVariant);
+  document.getElementById('undo-count').textContent = undoStack.length;
+}
+
+function handleClick(e) {
+  const { gx, gy } = screenToGrid(e.clientX, e.clientY);
+  if (gx < 0 || gx >= GRID || gy < 0 || gy >= GRID) return;
+
+  if (selectedTool === 'brush') {
+    // 右键擦除
+    if (e.button === 2) { paintCell(gx, gy, TERRAIN.WATER, 0); return; }
+    paintCell(gx, gy, selectedTerrain, selectedVariant);
+  } else if (selectedTool === 'eraser') {
+    paintCell(gx, gy, TERRAIN.WATER, 0);
+  } else if (selectedTool === 'building') {
+    if (!selectedBuildingId) { toast('⚠️ 请先在右边栏选一个建筑'); return; }
+    const bCfg = buildingCfgs.find(c => c.id === selectedBuildingId) || {};
+    const gw = bCfg.gridW || 1, gh = bCfg.gridH || 1;
+    const blocked = new Set([TERRAIN.WATER, TERRAIN.STONE]);
+    // 检查占位范围
+    for (let dy = 0; dy < gh; dy++) {
+      for (let dx = 0; dx < gw; dx++) {
+        const cx = gx + dx, cy = gy + dy;
+        if (cx >= GRID || cy >= GRID) { toast('❌ 超出地图边界'); return; }
+        const { type } = dec(map[cy]?.[cx] ?? 0);
+        if (blocked.has(type)) { toast('❌ 此处不可建造'); return; }
+        if (buildCells.find(b => b.x === cx && b.y === cy)) { toast('❌ 已有建筑'); return; }
+      }
+    }
+    pushUndo();
+    buildCells.push({ id: selectedBuildingId, x: gx, y: gy });
+    saveBuildings();
+    render();
+  }
+}
+
+function wakeRightErase(e) {
+  const { gx, gy } = screenToGrid(e.clientX, e.clientY);
+  if (gx < 0 || gx >= GRID || gy < 0 || gy >= GRID) return;
+  paintCell(gx, gy, TERRAIN.WATER, 0);
+}
+
+function paintCell(gx, gy, terrainType, variant) {
+  map[gy][gx] = enc(terrainType, variant);
+  saveMap();
+  render();
+}
+
+// ── Toast ──
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+}
+
+// ═══════════════════ 左侧边栏 ═══════════════════
+function refreshLeftSidebar() {
+  const sb = document.getElementById('left-sidebar');
+  sb.innerHTML = '<div class="sidebar-title">🏔 地形</div>';
+
+  for (const c of terrainCfgs) {
+    const item = document.createElement('div');
+    item.className = 'terrain-item' + (c.id === selectedTerrain ? ' active' : '');
+    item.innerHTML = `<span class="terrain-icon">${c.icon}</span> ${c.name}<span class="cfg-btn">⚙</span>`;
+    item.querySelector('.cfg-btn').onclick = e => { e.stopPropagation(); openTerrainConfig(c.id); };
+    item.onclick = () => selectTerrain(c.id);
+    sb.appendChild(item);
+
+    // tileset 的 tile 选择器
+    if (c.mode === 'tileset' && c.id === selectedTerrain) {
+      const picker = document.createElement('div');
+      picker.className = 'tile-picker active';
+      const grid = document.createElement('div');
+      grid.className = 'tile-grid';
+      for (let i = 0; i < 9; i++) {
+        const cell = document.createElement('canvas');
+        cell.className = 'tile-cell' + (i === selectedVariant ? ' selected' : '');
+        cell.width = 64; cell.height = 64;
+        const tctx = cell.getContext('2d');
+        tctx.imageSmoothingEnabled = false;
+        const imgs = imgCache['terrain_' + c.id];
+        if (imgs?.[i]) tctx.drawImage(imgs[i], 0, 0, 64, 64);
+        else { tctx.fillStyle = c.color; tctx.fillRect(0, 0, 64, 64); }
+        cell.onclick = () => selectVariant(i);
+        grid.appendChild(cell);
+      }
+      picker.appendChild(grid);
+      sb.appendChild(picker);
+    }
+  }
+
+  // 工具
+  const tools = document.createElement('div');
+  tools.className = 'tool-section';
+  tools.innerHTML = '<div class="sidebar-title">🔧 工具</div>';
+  ['brush:🖌 绘制', 'eraser:🧹 擦除', 'building:🏗️ 建筑'].forEach(opt => {
+    const [tool, label] = opt.split(':');
+    const btn = document.createElement('button');
+    btn.className = 'tool-btn';
+    btn.textContent = label;
+    if (tool === selectedTool) btn.style.borderColor = 'var(--accent)';
+    btn.onclick = () => selectTool(tool);
+    tools.appendChild(btn);
+  });
+  const clearBtn = document.createElement('button');
+  clearBtn.className = 'action-btn'; clearBtn.style.color = 'var(--red)';
+  clearBtn.textContent = '🗑 清除建筑';
+  clearBtn.onclick = () => { buildCells = []; saveBuildings(); render(); toast('建筑已清除'); };
+  tools.appendChild(clearBtn);
+
+  const actions = document.createElement('div');
+  actions.className = 'tool-section';
+  actions.innerHTML = '<div class="sidebar-title">💾 操作</div>';
+  ['export:📤 导出到游戏','reset:🔄 重置地图','fillGrass:🌿 全草','clearAll:🗑 清空地图','resize:📐 改大小','center:🎯 居中'].forEach(opt => {
+    const [act, label] = opt.split(':');
+    const btn = document.createElement('button');
+    btn.className = 'action-btn';
+    btn.textContent = label;
+    btn.onclick = () => handleAction(act);
+    actions.appendChild(btn);
+  });
+
+  sb.appendChild(tools);
+  sb.appendChild(actions);
+}
+
+function selectTerrain(id) {
+  selectedTerrain = id;
+  selectedTool = 'brush';
+  document.getElementById('mode-tag').style.display = 'inline';
+  document.getElementById('mode-tag').textContent = '🖌 绘制 ' + terrainCfgs[id].icon;
+  refreshLeftSidebar();
+}
+
+function selectVariant(i) {
+  selectedVariant = i;
+  refreshLeftSidebar();
+}
+
+function selectTool(t) {
+  selectedTool = t;
+  if (t === 'brush') {
+    document.getElementById('mode-tag').textContent = '🖌 绘制 ' + terrainCfgs[selectedTerrain].icon;
+    document.getElementById('mode-tag').style.display = 'inline';
+  } else if (t === 'eraser') {
+    document.getElementById('mode-tag').textContent = '🧹 擦除';
+    document.getElementById('mode-tag').style.display = 'inline';
+  } else if (t === 'building') {
+    document.getElementById('mode-tag').textContent = '🏗️ 建造';
+    document.getElementById('mode-tag').style.display = 'inline';
+  }
+  refreshLeftSidebar();
+  refreshRightSidebar();
+}
+
+// ═══════════════════ 右侧边栏 ═══════════════════
+function refreshRightSidebar() {
+  const sb = document.getElementById('right-sidebar');
+  sb.innerHTML = '<div class="sidebar-title">🏗️ 建筑</div>';
+
+  for (const b of buildingCfgs) {
+    const item = document.createElement('div');
+    item.className = 'building-item' + (b.id === selectedBuildingId && selectedTool === 'building' ? ' active' : '');
+    item.style.borderColor = (b.id === selectedBuildingId && selectedTool === 'building') ? 'var(--accent)' : '';
+
+    const left = document.createElement('span');
+    left.style.cssText = 'display:flex;align-items:center;gap:6px;flex:1';
+    const preview = document.createElement('canvas');
+    preview.width = 24; preview.height = 24;
+    const pctx = preview.getContext('2d');
+    pctx.imageSmoothingEnabled = false;
+    const img = imgCache['building_' + b.id];
+    if (img) pctx.drawImage(img, 0, 0, 24, 24);
+    else { pctx.fillStyle = '#555'; pctx.fillRect(0, 0, 24, 24); pctx.fillStyle = '#fff'; pctx.font = '12px sans-serif'; pctx.textAlign = 'center'; pctx.fillText(b.icon, 12, 17); }
+    left.appendChild(preview);
+    left.appendChild(document.createTextNode(b.name));
+    item.appendChild(left);
+    item.onclick = () => { selectedBuildingId = b.id; selectedTool = 'building'; document.getElementById('mode-tag').textContent = '🏗️ 建造 ' + b.name; document.getElementById('mode-tag').style.display = 'inline'; refreshLeftSidebar(); refreshRightSidebar(); };
+
+    const cfgBtn = document.createElement('span');
+    cfgBtn.className = 'cfg-btn';
+    cfgBtn.textContent = '⚙';
+    cfgBtn.onclick = e => { e.stopPropagation(); openBuildingConfig(b.id); };
+    item.appendChild(cfgBtn);
+
+    // 删建筑按钮
+    const delBtn = document.createElement('span');
+    delBtn.className = 'cfg-btn';
+    delBtn.textContent = '✕';
+    delBtn.style.color = 'var(--red)';
+    delBtn.onclick = e => { e.stopPropagation(); const idx = buildCells.findIndex(bc => bc.id === b.id); if (idx >= 0) { buildCells.splice(idx, 1); saveBuildings(); render(); refreshRightSidebar(); toast('🗑 已删除一处' + b.name); } };
+    item.appendChild(delBtn);
+
+    sb.appendChild(item);
+  }
+}
+
+// ═══════════════════ 地形配置弹窗 ═══════════════════
+function openTerrainConfig(id) {
+  const cfg = terrainCfgs[id];
+  const imgs = imgCache['terrain_' + id];
+  const hasTiles = cfg.tiles && cfg.tiles.length > 0;
+
+  const html = `
+    <label>📥 导入${cfg.mode === 'tileset' ? ' 192×192 PNG · 自动切成 9 张 tile' : ' 64×64 PNG'}</label>
+    ${cfg.mode === 'tileset' ?
+      `<input type="file" accept="image/png" id="timg"><br>
+      ${hasTiles ? `<div style="font-size:9px;color:var(--green)">✅ 已有 ${cfg.tiles.length} 张 tile</div>` : `<div style="font-size:9px;color:var(--muted)">⚠ 还没导入图片</div>`}
+      <div class="tile-preview-grid" id="tile-grid"></div>`
+      : cfg.mode === 'single' ?
+      `<canvas class="preview-box" id="spv" width="64" height="64"></canvas>
+      <input type="file" accept="image/png" id="timg">
+      <div style="font-size:9px;color:var(--muted)">${hasTiles ? '已有图片' : '未导入'}</div>`
+      :
+      `<label>颜色</label>
+      <div class="color-row"><span class="color-swatch" id="sw" style="background:${cfg.color}"></span><input type="text" id="clr" value="${cfg.color}"></div>`
+    }
+    <div class="btn-row">
+      <button class="btn-secondary" onclick="document.getElementById('modal').style.display='none'">取消</button>
+      ${hasTiles ? `<button class="btn-danger" onclick="delTerrainImg(${id})">🗑删图</button>` : ''}
+      <button class="btn-primary" onclick="saveTerrain(${id})">💾 保存</button>
+    </div>`;
+
+  document.getElementById('modal-inner').innerHTML = `<h3>⚙️ ${cfg.icon} ${cfg.name} 配置</h3>` + html;
+  document.getElementById('modal').style.display = 'flex';
+
+  // 预览已有 tile
+  if (cfg.mode === 'tileset' && hasTiles) {
+    drawTilesetPreview(imgs);
+  } else if (cfg.mode === 'single' && hasTiles) {
+    drawSinglePreview(imgs[0]);
+  }
+
+  // 图片导入
+  const fileInput = document.getElementById('timg');
+  if (fileInput) {
+    fileInput.onchange = async e => {
+      const file = e.target.files[0]; if (!file) return;
+      const dataUrl = await fileToDataUrl(file);
+      if (cfg.mode === 'tileset') {
+        const tileImgs = await sliceAndCache(id, dataUrl);
+        drawTilesetPreview(tileImgs);
+        toast(`✅ ${cfg.name}: 192×192 → 切成 9 张 tile`);
+      } else if (cfg.mode === 'single') {
+        cfg.tiles = [dataUrl];
+        const img = await dataUrlToImg(dataUrl).catch(() => null);
+        imgCache['terrain_' + id] = [img];
+        drawSinglePreview(img);
+        saveConfigs();
+        toast(`✅ ${cfg.name}: 图片已导入`);
+      }
+    };
+  }
+
+  // 颜色更新
+  const clrEl = document.getElementById('clr');
+  if (clrEl) {
+    clrEl.oninput = function() {
+      cfg.color = this.value;
+      document.getElementById('sw').style.background = this.value;
+    };
+  }
+
+  // 全局 save 函数
+  window.saveTerrain = () => {
+    if (cfg.mode === 'color' && clrEl) cfg.color = clrEl.value;
+    saveConfigs();
+    document.getElementById('modal').style.display = 'none';
+    refreshLeftSidebar();
+    render();
+    toast(`✅ ${cfg.name} 已保存`);
+  };
+  window.delTerrainImg = () => {
+    cfg.tiles = [];
+    delete imgCache['terrain_' + id];
+    saveConfigs();
+    document.getElementById('modal').style.display = 'none';
+    refreshLeftSidebar();
+    render();
+    toast(`🗑 ${cfg.name} 图片已删除`);
+  };
+}
+
+function drawTilesetPreview(imgs) {
+  const grid = document.getElementById('tile-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  for (let i = 0; i < 9; i++) {
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 64;
+    const tctx = c.getContext('2d');
+    tctx.imageSmoothingEnabled = false;
+    if (imgs?.[i]) tctx.drawImage(imgs[i], 0, 0, 64, 64);
+    else { tctx.fillStyle = '#333'; tctx.fillRect(0, 0, 64, 64); }
+    grid.appendChild(c);
+  }
+}
+
+function drawSinglePreview(img) {
+  const pv = document.getElementById('spv');
+  if (!pv) return;
+  const pctx = pv.getContext('2d');
+  pctx.imageSmoothingEnabled = false;
+  pctx.clearRect(0, 0, 64, 64);
+  if (img) pctx.drawImage(img, 0, 0, 64, 64);
+  else { pctx.fillStyle = '#333'; pctx.fillRect(0, 0, 64, 64); }
+}
+
+// ═══════════════════ 建筑配置弹窗 ═══════════════════
+function openBuildingConfig(bid) {
+  const cfg = buildingCfgs.find(b => b.id === bid);
+  if (!cfg) return;
+  const img = imgCache['building_' + bid];
+  const hasImg = !!cfg.image;
+
+  const html = `
+    <canvas class="preview-box" id="bpv" width="64" height="64"></canvas>
+    <input type="file" accept="image/png" id="bimg">
+    <div style="font-size:9px;color:var(--muted)">${hasImg ? '已有图片' : '未导入'}</div>
+    <label>偏移 (px)</label>
+    <div class="offset-grid">
+      <div><span style="color:var(--muted)">X</span><input type="number" id="ofx" value="${cfg.offsetX}" min="-96" max="96"></div>
+      <div><span style="color:var(--muted)">Y</span><input type="number" id="ofy" value="${cfg.offsetY}" min="-96" max="96"></div>
+    </div>
+    <label>精灵尺寸 (px)</label>
+    <div class="offset-grid">
+      <div><span style="color:var(--muted)">W</span><input type="number" id="sw" value="${cfg.spriteW || 64}" min="32" max="256"></div>
+      <div><span style="color:var(--muted)">H</span><input type="number" id="sh" value="${cfg.spriteH || 64}" min="32" max="256"></div>
+    </div>
+    <label>占位 (格)</label>
+    <div class="offset-grid">
+      <div><span style="color:var(--muted)">宽</span><input type="number" id="gwv" value="${cfg.gridW || 1}" min="1" max="4"></div>
+      <div><span style="color:var(--muted)">高</span><input type="number" id="ghv" value="${cfg.gridH || 1}" min="1" max="4"></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn-secondary" onclick="document.getElementById('modal').style.display='none'">取消</button>
+      ${hasImg ? `<button class="btn-danger" onclick="delBldImg('${bid}')">🗑删图</button>` : ''}
+      <button class="btn-primary" onclick="saveBld('${bid}')">💾 保存</button>
+    </div>`;
+
+  document.getElementById('modal-inner').innerHTML = `<h3>⚙️ 🏠 ${cfg.name} 配置</h3>` + html;
+  document.getElementById('modal').style.display = 'flex';
+
+  // 预览
+  const pv = document.getElementById('bpv');
+  if (pv) {
+    const pctx = pv.getContext('2d');
+    pctx.imageSmoothingEnabled = false;
+    if (img) pctx.drawImage(img, 0, 0, 64, 64);
+    else { pctx.fillStyle = '#333'; pctx.fillRect(0, 0, 64, 64); }
+  }
+
+  document.getElementById('bimg').onchange = async e => {
+    const file = e.target.files[0]; if (!file) return;
+    const dataUrl = await fileToDataUrl(file);
+    cfg.image = dataUrl;
+    imgCache['building_' + bid] = await dataUrlToImg(dataUrl).catch(() => null);
+    saveConfigs();
+    refreshRightSidebar();
+    render();
+    toast(`✅ ${cfg.name} 图片已导入`);
+    // refresh preview
+    const pv2 = document.getElementById('bpv');
+    if (pv2) { const pctx2 = pv2.getContext('2d'); pctx2.clearRect(0,0,64,64); pctx2.imageSmoothingEnabled = false; pctx2.drawImage(imgCache['building_'+bid], 0,0,64,64); }
+  };
+
+  window.saveBld = () => {
+    cfg.offsetX = parseInt(document.getElementById('ofx').value) || 0;
+    cfg.offsetY = parseInt(document.getElementById('ofy').value) || 0;
+    cfg.spriteW = parseInt(document.getElementById('sw').value) || 64;
+    cfg.spriteH = parseInt(document.getElementById('sh').value) || 64;
+    cfg.gridW = parseInt(document.getElementById('gwv').value) || 1;
+    cfg.gridH = parseInt(document.getElementById('ghv').value) || 1;
+    saveConfigs();
+    document.getElementById('modal').style.display = 'none';
+    refreshRightSidebar();
+    render();
+    toast(`✅ ${cfg.name} 已保存`);
+  };
+  window.delBldImg = () => {
+    cfg.image = null;
+    delete imgCache['building_' + bid];
+    saveConfigs();
+    document.getElementById('modal').style.display = 'none';
+    refreshRightSidebar();
+    render();
+    toast(`🗑 ${cfg.name} 图片已删除`);
+  };
+}
+
+// ═══════════════════ 操作 ═══════════════════
+function handleAction(act) {
+  if (act === 'export') exportToGame();
+  else if (act === 'reset') {
+    pushUndo(); initDefaultMap(); saveMap(); render(); toast('🔄 地图已重置');
+  } else if (act === 'fillGrass') {
+    pushUndo();
+    for (let y = 0; y < GRID; y++)
+      for (let x = 0; x < GRID; x++)
+        map[y][x] = enc(TERRAIN.GRASS, (x + y) % 2);
+    document.getElementById('undo-count').textContent = undoStack.length;
+    saveMap(); render();
+    toast('🌿 全草地');
+  } else if (act === 'clearAll') {
+    pushUndo();
+    for (let y = 0; y < GRID; y++)
+      for (let x = 0; x < GRID; x++)
+        map[y][x] = enc(TERRAIN.WATER, 0);
+    document.getElementById('undo-count').textContent = undoStack.length;
+    saveMap(); render();
+    toast('🗑 地图已清空');
+  } else if (act === 'resize') {
+    const n = parseInt(prompt(`当前 ${GRID}×${GRID}，输入新大小（8~40）:`, GRID));
+    if (!n || n < 8 || n > 40) return;
+    resizeMap(n);
+    saveMap(); render();
+    toast(`📐 地图 → ${GRID}×${GRID}`);
+  } else if (act === 'center') {
+    const wr = document.getElementById('canvas-wrap').getBoundingClientRect();
+    zoom = Math.min(0.5, (wr.width - 40) / W, (wr.height - 40) / H);
+    panX = (wr.width - W * zoom) / 2;
+    panY = (wr.height - H * zoom) / 2;
+    render();
+    toast('🎯 已居中');
+  }
+}
+
+function exportToGame() {
+  const payload = {
+    version: 1,
+    terrainConfigs: terrainCfgs.map(c => ({
+      id: c.id, mode: c.mode, tiles: c.tiles || [], color: c.color,
+    })),
+    buildingConfigs: buildingCfgs.map(b => ({
+      id: b.id, image: b.image || null, spriteW: b.spriteW || 64, spriteH: b.spriteH || 64,
+      gridW: b.gridW || 1, gridH: b.gridH || 1, offsetX: b.offsetX, offsetY: b.offsetY,
+    })),
+    map: map,          // 完整 map 数据
+    buildCells: buildCells,
+    gridSize: GRID,
+    cellSize: CELL,
+  };
+  localStorage.setItem('gameAssets', JSON.stringify(payload));
+  toast(`📤 已导出到游戏！
+打开 localhost:3001 刷新即生效`);
+}
+
+// 弹窗关闭
+window.addEventListener('click', e => {
+  if (e.target.id === 'modal') e.target.style.display = 'none';
+});
+
+// ── 启动 ──
+init();
+</script></body></html>
