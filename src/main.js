@@ -9,9 +9,14 @@ import { initDB, saveGameData, loadGameData } from './core/storage.js';
 import { initVocabulary } from './core/vocab-engine.js';
 import { tickIncome, tickIncomeWithBuffs, calculateOfflineIncome, mergeResources, deductResources, canAfford, formatElapsed, formatIncome } from './core/economy.js';
 import { createIslandEngine } from './core/island-engine.js';
+import { createPickupSystem } from './core/pickup-system.js';
+import { createStarEconomy } from './core/star-economy.js';
 import { createResourceBar } from './components/ResourceBar.js';
 import { createVocabOverlay } from './components/VocabOverlay.js';
 import { createBuildDrawer } from './components/BuildDrawer.js';
+import { createTreasureChest } from './components/TreasureChest.js';
+import { createSettingsPanel } from './components/SettingsPanel.js';
+import { createRoadmapPanel } from './components/RoadmapPanel.js';
 import { createToast } from './components/Toast.js';
 import { createAchievementsPanel } from './components/AchievementsPanel.js';
 import { transition, getState } from './core/state.js';
@@ -43,16 +48,20 @@ async function bootstrap() {
       island: { level: 1, buildings: [], terrainMap: structuredClone(DEFAULT_ISLAND_TERRAIN), lastOnline: Date.now() },
       stats: { streak: 0, lastActive: new Date().toISOString().split('T')[0],
                wordsCorrect: 0, tickIncomeCount: 0 },
-      achievements: []
+      achievements: [],
+      timeOffset: 0,
+      roadmapRewards: { buildings: [], vocab: 0 }
     };
   }
 
-  // 兼容旧存档（无 terrainMap）
+  // 兼容旧存档
   if (!data.island.terrainMap) {
     data.island.terrainMap = structuredClone(DEFAULT_ISLAND_TERRAIN);
   }
   if (!data.stats.tickIncomeCount) data.stats.tickIncomeCount = 0;
   if (!data.achievements) data.achievements = [];
+  if (!data.timeOffset) data.timeOffset = 0;
+  if (!data.roadmapRewards) data.roadmapRewards = { buildings: [], vocab: 0 };
 
   // ─── 2. 离线收入结算 ───
   const oldLastOnline = data.island.lastOnline || Date.now();
@@ -79,7 +88,117 @@ async function bootstrap() {
   islandContainer.className = 'island-container';
   app.appendChild(islandContainer);
 
-  const island = createIslandEngine(islandContainer, assets);
+  // 星星经济
+  const starEcon = createStarEconomy();
+  if (data.starEcon) starEcon.loadState(data.starEcon);
+
+  // ─── 有效时间（跳时间机制）───
+  function getEffectiveNow() {
+    return Date.now() + (data.timeOffset || 0);
+  }
+  function getEffectiveDate() {
+    return new Date(getEffectiveNow()).toISOString().split('T')[0];
+  }
+
+  // ─── 全局星星激励动画 ───
+  function animateStarReward(starCount) {
+    const styleId = 'star-anim-style-' + Date.now();
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+      @keyframes ${styleId}-fly {
+        0%   { left:50%; top:50%; margin-left:-30px; margin-top:-30px; transform:scale(0.3); opacity:1; }
+        15%  { left:50%; top:50%; margin-left:-30px; margin-top:-30px; transform:scale(1.1); opacity:1; }
+        40%  { left:50%; top:50%; margin-left:-30px; margin-top:-30px; transform:scale(0.8); opacity:1; }
+        55%  { left:50%; top:50%; margin-left:-30px; margin-top:-30px; transform:scale(0.3); opacity:1; }
+        82%  { left:4%;  top:4%;  margin-left:-12px; margin-top:-12px; transform:scale(0.5); opacity:1; }
+        100% { left:4%;  top:4%;  margin-left:-12px; margin-top:-12px; transform:scale(0.3); opacity:0; }
+      }
+    `;
+    document.head.appendChild(style);
+
+    const star = document.createElement('div');
+    star.textContent = '⭐';
+    star.style.cssText = `
+      position:fixed; left:50%; top:50%; margin-left:-30px; margin-top:-30px;
+      width:60px; height:60px;
+      font-size:50px; line-height:60px; text-align:center;
+      pointer-events:none; z-index:1001;
+      filter: drop-shadow(0 0 12px #FFD700);
+      animation: ${styleId}-fly 1400ms cubic-bezier(0.34,1.56,0.64,1) forwards;
+    `;
+    document.body.appendChild(star);
+    star.addEventListener('animationend', () => {
+      star.remove();
+      style.remove();
+    });
+
+    // "+N" 飘字 — 飞到后才出现
+    const plusText = document.createElement('span');
+    plusText.textContent = `+${starCount}`;
+    plusText.style.cssText = `
+      position:fixed; left:4%; top:3%;
+      font-size:22px; font-weight:900; color:#FFD700;
+      pointer-events:none; z-index:1001;
+      text-shadow: 0 0 8px rgba(0,0,0,0.7);
+      opacity:0;
+      animation: starPlusPopup 1200ms 900ms ease-out forwards;
+    `;
+    document.body.appendChild(plusText);
+
+    if (!document.getElementById('star-plus-keyframes')) {
+      const kfStyle = document.createElement('style');
+      kfStyle.id = 'star-plus-keyframes';
+      kfStyle.textContent = `
+        @keyframes starPlusPopup {
+          0%   { opacity:0; transform:translateY(15px) scale(0.4); }
+          25%  { opacity:1; transform:translateY(0) scale(1.3); }
+          70%  { opacity:1; transform:translateY(-15px) scale(1); }
+          100% { opacity:0; transform:translateY(-45px) scale(0.7); }
+        }
+      `;
+      document.head.appendChild(kfStyle);
+    }
+
+    plusText.addEventListener('animationend', () => plusText.remove());
+  }
+
+  // ─── Roadmap 里程碑奖励 ───
+  const VOCAB_MILESTONES = [1, 10, 50, 100, 200, 500, 1000];
+
+  function countLearned(vocab) {
+    return (vocab || []).filter(w => w.learnedAt !== null).length;
+  }
+
+  function checkRoadmapRewards(buildingId) {
+    let rewarded = false;
+    // 建筑：首次建造该类型 → +1 ⭐
+    if (buildingId && !data.roadmapRewards.buildings.includes(buildingId)) {
+      data.roadmapRewards.buildings.push(buildingId);
+      data.resources = mergeResources(data.resources, { star: 1 });
+      rewarded = true;
+    }
+    // 词汇：跨过新里程碑 → +1 ⭐
+    const learned = countLearned(data.vocabulary);
+    const lastMilestone = data.roadmapRewards.vocab;
+    for (const m of VOCAB_MILESTONES) {
+      if (learned >= m && m > lastMilestone) {
+        data.roadmapRewards.vocab = m;
+        data.resources = mergeResources(data.resources, { star: 1 });
+        rewarded = true;
+      }
+    }
+    return rewarded;
+  }
+
+  // 拾取物系统
+  const pickupSystem = createPickupSystem();
+  if (data.pickupSystem) pickupSystem.loadState(data.pickupSystem);
+  // 每日刷新石材
+  pickupSystem.trySpawn(getEffectiveDate(), data.island.buildings);
+  pickupSystem.setRenderFn(() => island.render());
+
+  const island = createIslandEngine(islandContainer, assets, pickupSystem);
   islandContainer.appendChild(island.canvas);
   island.setBuildings(data.island.buildings);
   island.setTerrainMap(data.island.terrainMap);
@@ -115,6 +234,7 @@ async function bootstrap() {
       toast.show(`${a.icon} 成就解锁: ${a.name}！\n${a.desc}`, 3000);
       if (a.reward) {
         data.resources = mergeResources(data.resources, a.reward);
+        if (a.reward.star) animateStarReward(a.reward.star);
         resourceBar.update(data.resources, data.island.level);
       }
     });
@@ -122,16 +242,128 @@ async function bootstrap() {
   }
 
   // 背词覆盖层
-  const vocabOverlay = createVocabOverlay(assets, data.vocabulary, (rewards) => {
-    data.resources = mergeResources(data.resources, rewards);
-    resourceBar.update(data.resources, data.island.level);
-    // 统计答对数（rewards 里的 star 来自正确答题）
-    if (rewards.star) data.stats.wordsCorrect = (data.stats.wordsCorrect || 0) + 1;
+  const vocabOverlay = createVocabOverlay(assets, data.vocabulary, (rewards, allSessionWords, sessionResults) => {
+    // 基础奖励不立即合并，留给宝箱动画结束后统一处理
+    if (rewards.star) data.stats.wordsCorrect = (data.stats.wordsCorrect || 0) + rewards.star;
+    // 星星经济 — 逐题结算
+    let totalExtraStars = 0;
+    if (sessionResults && sessionResults.length > 0) {
+      for (const sr of sessionResults) {
+        const extraStars = starEcon.record(sr.box, sr.quality);
+        if (extraStars > 0) {
+          data.resources = mergeResources(data.resources, { star: extraStars });
+          totalExtraStars += extraStars;
+        }
+      }
+      resourceBar.update(data.resources, data.island.level);
+    }
+    // Roadmap 里程碑奖励（词汇）
+    if (checkRoadmapRewards(null)) {
+      toast.show(`⭐ Roadmap 里程碑达成！+1 星星`);
+      resourceBar.update(data.resources, data.island.level);
+      totalExtraStars += 1;
+    }
+    if (totalExtraStars > 0) animateStarReward(totalExtraStars);
     checkAchievementsForStats();
     saveGameData(data);
-  });
+    treasureChest.show(rewards, data.vocabulary);
+  }, undefined, getEffectiveNow, animateStarReward);
   vocabOverlay.setToast(toast);
   app.appendChild(vocabOverlay.element);
+
+  // ─── 宝箱资源飞行动画 ───
+  const RES_ICONS = { gold: '🪙', wood: '🪵', stone: '🪨', star: '⭐' };
+  const RES_COLORS = { gold: '#FFD700', wood: '#CD853F', stone: '#A0A0A0', star: '#FFD700' };
+
+  function animateRewardFly(rewards, onDone) {
+    console.log('[animateRewardFly] rewards:', JSON.stringify(rewards));
+    const entries = Object.entries(rewards).filter(([, v]) => v > 0);
+    console.log('[animateRewardFly] entries:', entries);
+    if (entries.length === 0) { onDone(); return; }
+
+    let done = 0;
+    const targets = { star: 4, gold: 12, wood: 20, stone: 28 };
+
+    entries.forEach(([key, count], i) => {
+      setTimeout(() => {
+        const styleId = 'res-fly-' + Date.now() + '-' + i;
+        const style = document.createElement('style');
+        style.id = styleId;
+        const targetLeft = targets[key] || 5;
+        style.textContent = `
+          @keyframes ${styleId}-fly {
+            0%   { left:50%; top:50%; margin-left:-30px; margin-top:-30px; transform:scale(0.3); opacity:1; }
+            15%  { left:50%; top:50%; margin-left:-30px; margin-top:-30px; transform:scale(1.1); opacity:1; }
+            40%  { left:50%; top:50%; margin-left:-30px; margin-top:-30px; transform:scale(0.8); opacity:1; }
+            55%  { left:50%; top:50%; margin-left:-30px; margin-top:-30px; transform:scale(0.3); opacity:1; }
+            82%  { left:${targetLeft}%; top:4%; margin-left:-12px; margin-top:-12px; transform:scale(0.5); opacity:1; }
+            100% { left:${targetLeft}%; top:4%; margin-left:-12px; margin-top:-12px; transform:scale(0.3); opacity:0; }
+          }
+        `;
+        document.head.appendChild(style);
+
+        const el = document.createElement('div');
+        el.textContent = RES_ICONS[key] || '?';
+        el.style.cssText = `
+          position:fixed; left:50%; top:50%; margin-left:-30px; margin-top:-30px;
+          width:60px; height:60px;
+          font-size:50px; line-height:60px; text-align:center;
+          pointer-events:none; z-index:1001;
+          filter: drop-shadow(0 0 12px ${RES_COLORS[key] || '#fff'});
+          animation: ${styleId}-fly 1400ms cubic-bezier(0.34,1.56,0.64,1) forwards;
+        `;
+        document.body.appendChild(el);
+
+        // "+N" 飘字
+        const plusEl = document.createElement('span');
+        plusEl.textContent = `+${count}`;
+        plusEl.style.cssText = `
+          position:fixed; left:${targetLeft}%; top:3%;
+          font-size:22px; font-weight:900; color:${RES_COLORS[key] || '#fff'};
+          pointer-events:none; z-index:1001;
+          text-shadow: 0 0 8px rgba(0,0,0,0.7);
+          opacity:0;
+          animation: starPlusPopup 1200ms 900ms ease-out forwards;
+        `;
+        document.body.appendChild(plusEl);
+
+        el.addEventListener('animationend', () => {
+          el.remove();
+          style.remove();
+        });
+        plusEl.addEventListener('animationend', () => {
+          plusEl.remove();
+          done++;
+          if (done >= entries.length) onDone();
+        });
+      }, i * 200);
+    });
+  }
+
+  // ─── 宝箱系统 ───
+  const treasureChest = createTreasureChest((rewards) => {
+    console.log('[treasureChest onComplete] rewards:', JSON.stringify(rewards));
+    animateRewardFly(rewards, () => {
+      data.resources = mergeResources(data.resources, rewards);
+      resourceBar.update(data.resources, data.island.level);
+      checkAchievementsForStats();
+      saveGameData(data);
+    });
+  });
+  app.appendChild(treasureChest.element);
+
+  // ─── 设置面板 ───
+  const settingsPanel = createSettingsPanel();
+  settingsPanel.setOnTimeChange((newOffset) => {
+    data.timeOffset = newOffset;
+    saveGameData(data);
+    toast.show('⏩ 已跳到下一天');
+  });
+  app.appendChild(settingsPanel.element);
+
+  // ─── 路线图面板 ───
+  const roadmapPanel = createRoadmapPanel();
+  app.appendChild(roadmapPanel.element);
 
   // 建造抽屉
   // ─── 预览模式状态 ───
@@ -186,7 +418,7 @@ async function bootstrap() {
   });
 
   const buildDrawer = createBuildDrawer(
-    assets, () => data.resources, data.vocabulary, data.island.level, island,
+    assets, () => data.resources, () => data.resources.star || 0, data.vocabulary, data.island.level, island,
     (building) => {
       // 选择建筑 → 进入预览模式
       transition(AppState.PREVIEW);
@@ -205,15 +437,30 @@ async function bootstrap() {
   app.appendChild(buildDrawer.element);
   app.appendChild(achievementsPanel.element);
 
-  // ─── 放置建筑（点击事件）───
+  // ─── 拾取物点击事件 ───
+  pickupSystem.setOnPickup((reward) => {
+    data.resources = mergeResources(data.resources, reward);
+    resourceBar.update(data.resources, data.island.level);
+    toast.show(`🪨 拾取石材 +${reward.stone}！`);
+    saveGameData(data);
+  });
+
+  // ─── 岛屿点击（拾取物检测 + 建造放置）───
   island.canvas.addEventListener('click', (e) => {
-    if (getState() !== AppState.PREVIEW || !previewBuilding) return;
     if (island.wasPanning) { island.resetPanFlag(); return; }
 
     const rect = island.canvas.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
     const { x, y } = island.screenToGrid(sx, sy);
+
+    // 拾取物检测（非预览模式）
+    if (getState() !== AppState.PREVIEW) {
+      const pickup = pickupSystem.pickup(sx, sy);
+      if (pickup) return;
+    }
+
+    if (getState() !== AppState.PREVIEW || !previewBuilding) return;
 
     if (!island.isInBounds(x, y) || island.isOccupied(x, y) || !island.isBuildable(x, y)) {
       toast.show('此处无法建造');
@@ -238,6 +485,12 @@ async function bootstrap() {
 
     resourceBar.update(data.resources, data.island.level);
     toast.show(`${previewBuilding.icon} ${previewBuilding.name} 建成！`);
+    // Roadmap 里程碑奖励
+    if (checkRoadmapRewards(previewBuilding.id)) {
+      toast.show(`⭐ Roadmap 里程碑达成！+1 星星`);
+      resourceBar.update(data.resources, data.island.level);
+      animateStarReward(1);
+    }
     saveGameData(data);
     checkAchievementsForStats();
     cancelPreview();
@@ -300,7 +553,21 @@ async function bootstrap() {
     achievementsPanel.show(data.achievements);
   };
 
-  buttonBar.append(vocabBtn, buildBtn, achBtn, resetBtn);
+  const roadmapBtn = document.createElement('button');
+  roadmapBtn.className = 'btn-pixel';
+  roadmapBtn.textContent = '🗺️ 路线';
+  roadmapBtn.onclick = () => {
+    roadmapPanel.show(data.island.buildings, data.vocabulary);
+  };
+
+  const settingsBtn = document.createElement('button');
+  settingsBtn.className = 'btn-pixel';
+  settingsBtn.textContent = '⚙️ 设置';
+  settingsBtn.onclick = () => {
+    settingsPanel.show(data.timeOffset);
+  };
+
+  buttonBar.append(vocabBtn, buildBtn, achBtn, roadmapBtn, settingsBtn, resetBtn);
   app.appendChild(buttonBar);
 
   // ─── 5. 更新资源栏 ───
@@ -340,11 +607,11 @@ async function bootstrap() {
   }
 
   // ─── 7. 离线收入 + 打卡 ───
-  // 打卡逻辑
-  const today = new Date().toISOString().split('T')[0];
+  // 打卡逻辑（使用有效日期）
+  const today = getEffectiveDate();
   let streakReward = null;
   if (data.stats.lastActive !== today) {
-    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    const yesterday = new Date(getEffectiveNow() - 86400000).toISOString().split('T')[0];
     if (data.stats.lastActive === yesterday) {
       data.stats.streak = (data.stats.streak || 0) + 1;
       // 连续打卡奖励
@@ -391,6 +658,8 @@ async function bootstrap() {
   setInterval(() => {
     data.island.buildings = island.getBuildings();
     data.island.lastOnline = Date.now();
+    data.pickupSystem = pickupSystem.getState();
+    data.starEcon = starEcon.getState();
     saveGameData(data);
   }, 30000);
 
