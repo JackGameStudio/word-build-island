@@ -4,7 +4,7 @@ export const STARTING_RESOURCES = {
 };
 
 // 经济系统
-export const ECONOMY_TICK = 6000;       // ms per tick
+export const ECONOMY_TICK = 18000;      // ms per tick
 export const OFFLINE_RATE = 0.1;        // 10% 离线倍率
 export const OFFLINE_MAX_HOURS = 8;     // 最大离线累积
 export const ISLAND_GRID_SIZE = 12;     // 12×12 网格

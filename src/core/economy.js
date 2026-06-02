@@ -15,7 +15,7 @@ const REWARD_TABLE = {
   2: [ { gold: 3, wood: 2 },            { gold: 1, wood: 1 } ],
   3: [ { gold: 5, wood: 3 },              { gold: 2, wood: 1 } ],
   4: [ { gold: 8, wood: 5, stone: 3 },     { gold: 3, wood: 2 } ],
-  5: [ { gold: 12, wood: 8, stone: 5, star: 1 }, { gold: 5, wood: 3, stone: 1 } ]
+  5: [ { gold: 12, wood: 8, stone: 5 }, { gold: 5, wood: 3, stone: 1 } ]
 };
 
 /**
@@ -232,4 +232,38 @@ export function formatIncome(income) {
     .filter(([, v]) => v > 0)
     .map(([k, v]) => `${icons[k] || k}+${v}`)
     .join('  ');
+}
+
+/**
+ * 计算当前所有建筑提供的资源容量上限。
+ * 每个有 capacity 字段的建筑按数量累加。
+ */
+export function calculateCapacity(buildings) {
+  const cap = {};
+  for (const b of buildings) {
+    const def = getBuildingById(b.id);
+    if (def && def.capacity) {
+      const count = b.count || 1;
+      for (const [k, v] of Object.entries(def.capacity)) {
+        cap[k] = (cap[k] || 0) + v * count;
+      }
+    }
+  }
+  return cap;
+}
+
+/**
+ * 将资源裁剪到容量上限以内，返回 { capped, overflow }。
+ * overflow 记录每种资源被裁剪掉的量（key: 资源名, value: 溢出量）。
+ */
+export function capResources(resources, capacity) {
+  const capped = { ...resources };
+  const overflow = {};
+  for (const [k, max] of Object.entries(capacity)) {
+    if (capped[k] > max) {
+      overflow[k] = capped[k] - max;
+      capped[k] = max;
+    }
+  }
+  return { capped, overflow };
 }

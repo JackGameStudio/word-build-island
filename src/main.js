@@ -7,7 +7,7 @@
 import { preloadAssets } from './core/asset-loader.js';
 import { initDB, saveGameData, loadGameData } from './core/storage.js';
 import { initVocabulary } from './core/vocab-engine.js';
-import { tickIncome, tickIncomeWithBuffs, calculateOfflineIncome, mergeResources, deductResources, canAfford, formatElapsed, formatIncome } from './core/economy.js';
+import { tickIncome, tickIncomeWithBuffs, calculateOfflineIncome, mergeResources, deductResources, canAfford, formatElapsed, formatIncome, calculateCapacity, capResources } from './core/economy.js';
 import { createIslandEngine } from './core/island-engine.js';
 import { createPickupSystem } from './core/pickup-system.js';
 import { createStarEconomy } from './core/star-economy.js';
@@ -194,15 +194,28 @@ async function bootstrap() {
   // 拾取物系统
   const pickupSystem = createPickupSystem();
   if (data.pickupSystem) pickupSystem.loadState(data.pickupSystem);
+  pickupSystem.setRockImage(assets.icons);
   // 每日刷新石材
   pickupSystem.trySpawn(getEffectiveDate(), data.island.buildings);
   pickupSystem.setRenderFn(() => island.render());
 
   const island = createIslandEngine(islandContainer, assets, pickupSystem);
   islandContainer.appendChild(island.canvas);
+  // 迁移旧存档：没有 treeVariant 的树建筑随机补上
+  for (const b of data.island.buildings) {
+    if (b.id === 'tree' && b.treeVariant === undefined) {
+      b.treeVariant = Math.floor(Math.random() * 7);
+    }
+  }
   island.setBuildings(data.island.buildings);
   island.setTerrainMap(data.island.terrainMap);
   island.render();
+
+  // 动画循环 — 持续渲染以驱动拾取物动画
+  (function animLoop() {
+    island.render();
+    requestAnimationFrame(animLoop);
+  })();
 
   // ─── 等级计算 ───
   function calcLevel() {
@@ -241,39 +254,36 @@ async function bootstrap() {
     updateLevel();
   }
 
+  // 笔记式计数 — 背词过程中实时累加
+  const onStarEarned = (count) => {
+    data.resources = mergeResources(data.resources, { star: count });
+    resourceBar.update(data.resources, data.island.level);
+    animateStarReward(count);
+  };
+
   // 背词覆盖层
   const vocabOverlay = createVocabOverlay(assets, data.vocabulary, (rewards, allSessionWords, sessionResults) => {
     // 基础奖励不立即合并，留给宝箱动画结束后统一处理
     if (rewards.star) data.stats.wordsCorrect = (data.stats.wordsCorrect || 0) + rewards.star;
-    // 星星经济 — 逐题结算
-    let totalExtraStars = 0;
-    if (sessionResults && sessionResults.length > 0) {
-      for (const sr of sessionResults) {
-        const extraStars = starEcon.record(sr.box, sr.quality);
-        if (extraStars > 0) {
-          data.resources = mergeResources(data.resources, { star: extraStars });
-          totalExtraStars += extraStars;
-        }
-      }
-      resourceBar.update(data.resources, data.island.level);
-    }
+    // 星星经济已由 VocabOverlay 逐题实时结算
     // Roadmap 里程碑奖励（词汇）
     if (checkRoadmapRewards(null)) {
       toast.show(`⭐ Roadmap 里程碑达成！+1 星星`);
+      data.resources = mergeResources(data.resources, { star: 1 });
       resourceBar.update(data.resources, data.island.level);
-      totalExtraStars += 1;
+      animateStarReward(1);
     }
-    if (totalExtraStars > 0) animateStarReward(totalExtraStars);
     checkAchievementsForStats();
     saveGameData(data);
     treasureChest.show(rewards, data.vocabulary);
-  }, undefined, getEffectiveNow, animateStarReward);
+  }, undefined, getEffectiveNow, onStarEarned, starEcon);
   vocabOverlay.setToast(toast);
   app.appendChild(vocabOverlay.element);
 
   // ─── 宝箱资源飞行动画 ───
   const RES_ICONS = { gold: '🪙', wood: '🪵', stone: '🪨', star: '⭐' };
   const RES_COLORS = { gold: '#FFD700', wood: '#CD853F', stone: '#A0A0A0', star: '#FFD700' };
+  const CAPACITY_BUILDERS = { wood: '伐木场', gold: '小屋', stone: '采石场' };
 
   function animateRewardFly(rewards, onDone) {
     console.log('[animateRewardFly] rewards:', JSON.stringify(rewards));
@@ -282,7 +292,7 @@ async function bootstrap() {
     if (entries.length === 0) { onDone(); return; }
 
     let done = 0;
-    const targets = { star: 4, gold: 12, wood: 20, stone: 28 };
+    const targets = { star: 6, gold: 17, wood: 43, stone: 60 };
 
     entries.forEach(([key, count], i) => {
       setTimeout(() => {
@@ -294,9 +304,9 @@ async function bootstrap() {
           @keyframes ${styleId}-fly {
             0%   { left:50%; top:50%; margin-left:-30px; margin-top:-30px; transform:scale(0.3); opacity:1; }
             15%  { left:50%; top:50%; margin-left:-30px; margin-top:-30px; transform:scale(1.1); opacity:1; }
-            40%  { left:50%; top:50%; margin-left:-30px; margin-top:-30px; transform:scale(0.8); opacity:1; }
-            55%  { left:50%; top:50%; margin-left:-30px; margin-top:-30px; transform:scale(0.3); opacity:1; }
-            82%  { left:${targetLeft}%; top:4%; margin-left:-12px; margin-top:-12px; transform:scale(0.5); opacity:1; }
+            35%  { left:50%; top:50%; margin-left:-30px; margin-top:-30px; transform:scale(0.6); opacity:1; }
+            55%  { left:${targetLeft}%; top:20%; margin-left:-12px; margin-top:-12px; transform:scale(0.7); opacity:1; }
+            80%  { left:${targetLeft}%; top:4%; margin-left:-12px; margin-top:-12px; transform:scale(0.5); opacity:1; }
             100% { left:${targetLeft}%; top:4%; margin-left:-12px; margin-top:-12px; transform:scale(0.3); opacity:0; }
           }
         `;
@@ -345,7 +355,14 @@ async function bootstrap() {
     console.log('[treasureChest onComplete] rewards:', JSON.stringify(rewards));
     animateRewardFly(rewards, () => {
       data.resources = mergeResources(data.resources, rewards);
+      const { capped, overflow } = capResources(data.resources, calculateCapacity(data.island.buildings));
+      data.resources = capped;
       resourceBar.update(data.resources, data.island.level);
+      for (const [k, v] of Object.entries(overflow)) {
+        const icon = RES_ICONS[k] || k;
+        const bldName = CAPACITY_BUILDERS[k] || '';
+        toast.show(`${icon} 容量已满，多建${bldName}扩容`, 2500);
+      }
       checkAchievementsForStats();
       saveGameData(data);
     });
@@ -358,6 +375,21 @@ async function bootstrap() {
     data.timeOffset = newOffset;
     saveGameData(data);
     toast.show('⏩ 已跳到下一天');
+  });
+  settingsPanel.setOnAddWords((count) => {
+    const now = Date.now();
+    for (let i = 0; i < count; i++) {
+      data.vocabulary.push({
+        word: `test_${Date.now()}_${i}`,
+        translation: `测试词${i}`,
+        box: 1,
+        learnedAt: now,
+        nextReview: now + 86400000,
+        reviewCount: 0
+      });
+    }
+    saveGameData(data);
+    toast.show(`📖 +${count} 测试词`);
   });
   app.appendChild(settingsPanel.element);
 
@@ -411,7 +443,7 @@ async function bootstrap() {
     const { x, y } = island.screenToGrid(sx, sy);
     const inBounds = island.isInBounds(x, y);
     const occupied = island.isOccupied(x, y);
-    const buildable = island.isBuildable(x, y);
+    const buildable = island.isBuildableFor(previewBuilding.id, x, y);
     const affordable = canAfford(data.resources, previewBuilding.cost);
     const valid = inBounds && !occupied && buildable && affordable;
     island.setGhost(previewBuilding, x, y, valid);
@@ -422,6 +454,10 @@ async function bootstrap() {
     (building) => {
       // 选择建筑 → 进入预览模式
       transition(AppState.PREVIEW);
+      // 树建筑预先生成随机变体用于 ghost 预览
+      if (building.id === 'tree') {
+        building._ghostVariant = Math.floor(Math.random() * 7);
+      }
       previewBuilding = building;
       islandContainer.style.cursor = 'none';
       showCancelBar(building);
@@ -456,13 +492,16 @@ async function bootstrap() {
 
     // 拾取物检测（非预览模式）
     if (getState() !== AppState.PREVIEW) {
-      const pickup = pickupSystem.pickup(sx, sy);
-      if (pickup) return;
+      const hitItem = island.hitTestPickup(sx, sy);
+      if (hitItem) {
+        pickupSystem.pickup(hitItem.gx, hitItem.gy);
+        return;
+      }
     }
 
     if (getState() !== AppState.PREVIEW || !previewBuilding) return;
 
-    if (!island.isInBounds(x, y) || island.isOccupied(x, y) || !island.isBuildable(x, y)) {
+    if (!island.isInBounds(x, y) || island.isOccupied(x, y) || !island.isBuildableFor(previewBuilding.id, x, y)) {
       toast.show('此处无法建造');
       return;
     }
@@ -474,13 +513,18 @@ async function bootstrap() {
 
     // 放置
     data.resources = deductResources(data.resources, previewBuilding.cost);
-    island.addBuilding({
+    const newBuilding = {
       id: previewBuilding.id,
       name: previewBuilding.name,
       icon: previewBuilding.icon,
       spriteIndex: previewBuilding.spriteIndex,
       x, y
-    });
+    };
+    if (previewBuilding.id === 'tree') {
+      newBuilding.treeVariant = previewBuilding._ghostVariant ?? Math.floor(Math.random() * 7);
+      delete previewBuilding._ghostVariant;
+    }
+    island.addBuilding(newBuilding);
     data.island.buildings = island.getBuildings();
 
     resourceBar.update(data.resources, data.island.level);
@@ -557,7 +601,7 @@ async function bootstrap() {
   roadmapBtn.className = 'btn-pixel';
   roadmapBtn.textContent = '🗺️ 路线';
   roadmapBtn.onclick = () => {
-    roadmapPanel.show(data.island.buildings, data.vocabulary);
+    roadmapPanel.show(data.island.buildings, data.vocabulary, data.resources.star || 0);
   };
 
   const settingsBtn = document.createElement('button');
@@ -646,8 +690,15 @@ async function bootstrap() {
     const { income, breakdown } = tickIncomeWithBuffs(data.island.buildings, data.stats);
     if (Object.keys(income).length > 0) {
       data.resources = mergeResources(data.resources, income);
+      const { capped, overflow } = capResources(data.resources, calculateCapacity(data.island.buildings));
+      data.resources = capped;
       data.stats.tickIncomeCount = (data.stats.tickIncomeCount || 0) + 1;
       resourceBar.update(data.resources, data.island.level);
+      for (const [k, v] of Object.entries(overflow)) {
+        const icon = RES_ICONS[k] || k;
+        const bldName = CAPACITY_BUILDERS[k] || '';
+        toast.show(`${icon} 容量已满，多建${bldName}扩容`, 2500);
+      }
       if (breakdown.length > 0) animateTickIncome(breakdown);
       checkAchievementsForStats();
       updateLevel();

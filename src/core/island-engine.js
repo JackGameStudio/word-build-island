@@ -9,6 +9,8 @@ import { drawSprite, drawTerrainTile } from './asset-loader.js';
 
 /** 不可建造的地形类型 */
 const BLOCKED_TERRAIN = new Set([TERRAIN.WATER, TERRAIN.STONE]);
+/** 码头只能造在水上 */
+const DOCK_ONLY_TERRAIN = new Set([TERRAIN.WATER]);
 
 export function createIslandEngine(container, assets, pickupSystem = null, customAssets = null) {
   const G = ISLAND_GRID_SIZE;
@@ -70,7 +72,13 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
 
     // 建筑 sprite
     buildings.forEach(b => {
-      if (b.spriteIndex !== undefined && assets.spritesheet) {
+      if (b.id === 'tree' && assets.treeSheet) {
+        const variant = b.treeVariant ?? 0;
+        ctx.drawImage(assets.treeSheet,
+          variant * 64, 0, 64, 64,
+          b.x * S, b.y * S - 16, S, S
+        );
+      } else if (b.spriteIndex !== undefined && assets.spritesheet) {
         drawSprite(ctx, assets.spritesheet,
           b.spriteIndex, SPRITE.CELL_W, SPRITE.CELL_H,
           b.x * S, b.y * S, S, S
@@ -87,7 +95,7 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
 
     // 幽灵预览
     if (ghost) {
-      const { spriteIndex, gx, gy, valid } = ghost;
+      const { id, spriteIndex, gx, gy, valid } = ghost;
 
       // 高亮格子
       ctx.fillStyle = valid ? 'rgba(74, 222, 128, 0.3)' : 'rgba(248, 113, 113, 0.3)';
@@ -95,7 +103,13 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
 
       // 半透明 sprite
       ctx.globalAlpha = 0.5;
-      if (assets.spritesheet && spriteIndex !== undefined) {
+      if (id === 'tree' && assets.treeSheet) {
+        const variant = ghost.treeVariant ?? 0;
+        ctx.drawImage(assets.treeSheet,
+          variant * 64, 0, 64, 64,
+          gx * S, gy * S - 16, S, S
+        );
+      } else if (assets.spritesheet && spriteIndex !== undefined) {
         drawSprite(ctx, assets.spritesheet, spriteIndex, SPRITE.CELL_W, SPRITE.CELL_H,
           gx * S, gy * S, S, S);
       } else {
@@ -180,8 +194,10 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
       const dx = pos.x - dragStartX;
       const dy = pos.y - dragStartY;
       if (Math.abs(dx) > 3 || Math.abs(dy) > 3) wasPanning = true;
-      offsetX = dragOffsetX + dx;
-      offsetY = dragOffsetY + dy;
+      if (wasPanning) {
+        offsetX = dragOffsetX + dx;
+        offsetY = dragOffsetY + dy;
+      }
     } else if (pointers.size >= 2) {
       // 双指平移
       const entries = [...pointers.values()];
@@ -189,8 +205,10 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
       const dx = mid.x - dragStartX;
       const dy = mid.y - dragStartY;
       if (Math.abs(dx) > 3 || Math.abs(dy) > 3) wasPanning = true;
-      offsetX = dragOffsetX + dx;
-      offsetY = dragOffsetY + dy;
+      if (wasPanning) {
+        offsetX = dragOffsetX + dx;
+        offsetY = dragOffsetY + dy;
+      }
     }
     render();
   });
@@ -214,7 +232,7 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
   const island = {
     canvas,
     render,
-    wasPanning,
+    get wasPanning() { return wasPanning; },
     resetPanFlag() { wasPanning = false; },
 
     setBuildings(b) { buildings = b; render(); },
@@ -224,6 +242,13 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
     getTerrainMap() { return terrainMap; },
     getTerrainType(gx, gy) { return terrainMap[gy]?.[gx] ?? 0; },
     isBuildable(gx, gy) { return !BLOCKED_TERRAIN.has(terrainMap[gy]?.[gx] ?? 0); },
+
+    /** 根据建筑类型判断该格是否可建造 */
+    isBuildableFor(buildingId, gx, gy) {
+      const terrain = terrainMap[gy]?.[gx] ?? 0;
+      if (buildingId === 'dock') return DOCK_ONLY_TERRAIN.has(terrain);
+      return !BLOCKED_TERRAIN.has(terrain);
+    },
 
     addBuilding(b) { buildings.push(b); render(); },
 
@@ -236,7 +261,12 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
 
     // ─── 幽灵预览 ───
     setGhost(building, gx, gy, valid) {
-      ghost = { spriteIndex: building?.spriteIndex, gx, gy, valid };
+      ghost = {
+        id: building?.id,
+        spriteIndex: building?.spriteIndex,
+        treeVariant: building?._ghostVariant,
+        gx, gy, valid
+      };
       render();
     },
     clearGhost() { ghost = null; render(); },

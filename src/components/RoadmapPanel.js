@@ -35,8 +35,8 @@ export function createRoadmapPanel() {
   overlay.style.display = 'none';
 
   const panel = document.createElement('div');
-  panel.className = 'slide-panel panel-9slice';
-  panel.style.cssText = 'padding:12px;width:440px;max-width:94vw;max-height:85vh;overflow-y:auto;';
+  panel.className = 'roadmap-panel slide-panel panel-9slice';
+  panel.style.cssText = 'padding:12px;max-height:85vh;overflow-y:auto;';
 
   const title = document.createElement('div');
   title.style.cssText = 'text-align:center;font-size:14px;font-weight:700;margin-bottom:10px;';
@@ -84,29 +84,11 @@ export function createRoadmapPanel() {
     buildInner.innerHTML = '';
     vocabInner.innerHTML = '';
 
-    // 按 tier 分组建筑
-    const tierGroups = {};
+    // 建筑列：直接按 BUILDINGS 顺序排列（column-reverse 自下而上）
     for (const b of BUILDINGS) {
-      const t = b.tier ?? 0;
-      if (!tierGroups[t]) tierGroups[t] = [];
-      tierGroups[t].push(b);
-    }
-
-    // 建筑列：从 T0 到 T4（column-reverse 让它自下而上）
-    for (let t = 0; t <= 4; t++) {
-      const group = tierGroups[t] || [];
-      if (t > 0 && group.length > 0) {
-        const sep = document.createElement('div');
-        sep.style.cssText = `text-align:center;font-size:10px;font-weight:700;color:${TIER_STYLES[t]?.color || '#666'};padding:4px 0;margin:4px 0;border-top:1px dashed #444;`;
-        sep.textContent = TIER_STYLES[t]?.label || `T${t}`;
-        buildInner.appendChild(sep);
-      }
-
-      for (const b of group) {
-        const built = builtIds.includes(b.id);
-        const row = createBuildRow(b, built);
-        buildInner.appendChild(row);
-      }
+      const built = builtIds.includes(b.id);
+      const row = createBuildRow(b, built);
+      buildInner.appendChild(row);
     }
 
     // 词汇列
@@ -124,7 +106,7 @@ export function createRoadmapPanel() {
     const bg = built ? 'rgba(74,222,128,0.1)' : canAfford ? TIER_STYLES[building.tier]?.bg || 'transparent' : 'transparent';
     row.style.cssText = `
       display:flex;align-items:center;gap:4px;padding:4px 6px;border-radius:6px;
-      background:${bg};font-size:10px;min-height:36px;
+      background:${bg};font-size:10px;height:32px;
       opacity:${built ? '1' : canAfford ? '0.85' : '0.45'};
     `;
 
@@ -155,7 +137,7 @@ export function createRoadmapPanel() {
     row.style.cssText = `
       display:flex;align-items:center;gap:4px;padding:4px 6px;border-radius:6px;
       background:${achieved ? 'rgba(96,165,250,0.1)' : 'transparent'};
-      font-size:10px;min-height:36px;
+      font-size:10px;height:32px;
       opacity:${achieved ? '1' : '0.45'};
     `;
 
@@ -186,13 +168,10 @@ export function createRoadmapPanel() {
     return row;
   }
 
-  function show(builtBuildings, vocabulary) {
+  function show(builtBuildings, vocabulary, stars = 0) {
     builtIds = (builtBuildings || []).map(b => b.id);
     totalWords = countLearnedWords(vocabulary || []);
-    totalStars = (builtBuildings || []).reduce((sum, b) => {
-      const def = BUILDINGS.find(d => d.id === b.id);
-      return sum + (def?.starRequired || 0);
-    }, 0);
+    totalStars = stars;
 
     overlay.style.display = 'block';
     overlay.style.backgroundColor = 'var(--color-overlay)';

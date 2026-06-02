@@ -9,6 +9,7 @@ export function createSettingsPanel() {
   let timeOffset = 0;
   let offsetDaysEl = null;
   let onTimeChange = null;
+  let onAddWords = null;
 
   // ─── DOM ───
   const overlay = document.createElement('div');
@@ -51,6 +52,14 @@ export function createSettingsPanel() {
   };
 
   timeSection.append(timeLabel, offsetDaysEl, skipBtn);
+
+  // 临时测试：+50 词
+  const testBtn = document.createElement('button');
+  testBtn.className = 'btn-pixel';
+  testBtn.textContent = '📖 +50 学会词语';
+  testBtn.style.cssText = 'width:100%;font-size:12px;margin-top:6px;';
+  testBtn.onclick = () => onAddWords?.(50);
+  timeSection.appendChild(testBtn);
 
   // 分隔线
   const divider = document.createElement('hr');
@@ -102,11 +111,14 @@ export function createSettingsPanel() {
 
   function setOnTimeChange(fn) { onTimeChange = fn; }
 
+  function setOnAddWords(fn) { onAddWords = fn; }
+
   return {
     element: overlay,
     show,
     hide,
     setOnTimeChange,
+    setOnAddWords,
     getTimeOffset: () => timeOffset
   };
 }

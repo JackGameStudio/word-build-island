@@ -15,7 +15,7 @@ const MODE = {
   SPELLING: 'spelling'
 };
 
-export function createVocabOverlay(assets, vocabArray, onSessionComplete, getBuffs = () => ({}), getEffectiveNow = () => Date.now(), onStarEarned = () => {}) {
+export function createVocabOverlay(assets, vocabArray, onSessionComplete, getBuffs = () => ({}), getEffectiveNow = () => Date.now(), onStarEarned = () => {}, starEcon = null) {
   let currentIndex = 0;
   let sessionRewards = {};
   let currentWord = null;
@@ -100,7 +100,53 @@ export function createVocabOverlay(assets, vocabArray, onSessionComplete, getBuf
   const progressEl = document.createElement('div');
   progressEl.style.cssText = 'text-align:center;font-size:11px;color:var(--color-muted);margin-top:8px;';
 
-  panel.append(topBar, wordEl, meaningEl, answerArea, spellArea, progressEl);
+  // 星星进度条（Box 3~5 可见）
+  const starProgressBar = document.createElement('div');
+  starProgressBar.style.cssText = 'display:none;justify-content:center;align-items:center;gap:6px;margin-bottom:6px;font-size:13px;';
+  const starProgressLabel = document.createElement('span');
+  starProgressLabel.textContent = '⭐';
+  const starProgressText = document.createElement('span');
+  starProgressText.style.cssText = 'font-size:12px;color:var(--color-muted);min-width:48px;text-align:center;';
+  const starProgressTrack = document.createElement('div');
+  starProgressTrack.style.cssText = 'width:120px;height:8px;background:#333;border-radius:4px;overflow:hidden;border:1px solid #555;';
+  const starProgressFill = document.createElement('div');
+  starProgressFill.style.cssText = 'width:0%;height:100%;background:linear-gradient(90deg,#facc15,#f59e0b);border-radius:3px;transition:width 0.3s ease;';
+  starProgressTrack.appendChild(starProgressFill);
+  starProgressBar.append(starProgressLabel, starProgressText, starProgressTrack);
+
+  const STAR_THRESHOLDS = { 3: 30, 4: 10, 5: 2 };
+
+  function updateStarProgress(box) {
+    if (!starEcon || box < 3) {
+      starProgressBar.style.display = 'none';
+      return;
+    }
+    starProgressBar.style.display = 'flex';
+    const state = starEcon.getState();
+    const count = state[`box${box}`] || 0;
+    const threshold = STAR_THRESHOLDS[box] || 1;
+    starProgressText.textContent = `${count}/${threshold}`;
+    starProgressFill.style.width = `${Math.min(100, (count / threshold) * 100)}%`;
+  }
+
+  function flashStarProgress(box) {
+    starProgressBar.style.transition = 'none';
+    starProgressFill.style.width = '100%';
+    starProgressFill.style.background = '#facc15';
+    starProgressFill.style.boxShadow = '0 0 12px #facc15';
+    starProgressText.textContent = '满格！';
+
+    requestAnimationFrame(() => {
+      starProgressBar.style.transition = '';
+      setTimeout(() => {
+        starProgressFill.style.boxShadow = '';
+        starProgressFill.style.background = 'linear-gradient(90deg,#facc15,#f59e0b)';
+        updateStarProgress(box);
+      }, 600);
+    });
+  }
+
+  panel.append(starProgressBar, topBar, wordEl, meaningEl, answerArea, spellArea, progressEl);
   overlay.appendChild(panel);
 
   // ─── 排字游戏状态 ───
@@ -144,6 +190,7 @@ export function createVocabOverlay(assets, vocabArray, onSessionComplete, getBuf
     progressEl.textContent = `${currentIndex + 1} / ${allSessionWords.length}`;
     autoDecideMode();
     updateRankTag();
+    updateStarProgress(currentWord.box || 1);
     renderCurrentQuestion();
   }
 
@@ -289,6 +336,18 @@ export function createVocabOverlay(assets, vocabArray, onSessionComplete, getBuf
       animateFly(el, reward);
       if (reward.star > 0) onStarEarned(reward.star);
 
+      // 星星经济 — 实时累加 + 进度条更新
+      if (starEcon) {
+        const box = currentWord.box || 1;
+        const earned = starEcon.record(box, quality);
+        if (earned > 0) {
+          flashStarProgress(box);
+          setTimeout(() => onStarEarned(earned), 200);
+        } else if (box >= 3) {
+          updateStarProgress(box);
+        }
+      }
+
     } else {
       el.style.background = '#f87171';
       if (mode === MODE.SPELLING) {
@@ -301,10 +360,10 @@ export function createVocabOverlay(assets, vocabArray, onSessionComplete, getBuf
       if (correctAnswer) {
         if (mode === MODE.SPELLING) {
           const hint = document.createElement('div');
-          hint.style.cssText = 'font-size:13px;color:#4ade80;margin-top:6px;text-align:center;';
+          hint.style.cssText = 'font-size:30px;color:#4ade80;margin-bottom:8px;text-align:center;font-weight:bold;';
           hint.textContent = `正确答案：${correctAnswer}`;
-          spellArea.appendChild(hint);
-          setTimeout(() => hint.remove(), 2200);
+          spellArea.insertBefore(hint, answerRow);
+          setTimeout(() => hint.remove(), 10200);
         } else {
           const correctBtn = Array.from(answerArea.children)
             .find(b => b.textContent === correctAnswer);
@@ -322,7 +381,7 @@ export function createVocabOverlay(assets, vocabArray, onSessionComplete, getBuf
       } else {
         showCurrentQuestion();
       }
-    }, isCorrect ? 800 : 1800);
+    }, isCorrect ? 800 : 10200);
   }
 
   function finishSession() {

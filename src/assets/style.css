@@ -157,7 +157,6 @@ html, body {
   right: 0 !important;
   bottom: 0 !important;
   max-height: 60vh !important;
-  margin: 0 auto !important;
   border-bottom-left-radius: 0 !important;
   border-bottom-right-radius: 0 !important;
 }

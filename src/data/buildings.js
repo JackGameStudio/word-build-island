@@ -31,12 +31,13 @@ export const BUILDINGS = [
     spriteIndex: 1,
     cost: { gold: 10 },
     income: { wood: 1 },
+    capacity: { wood: 100 },
     buff: { type: 'woodBonus', value: 1, description: '所有木材建筑产量+1' },
     levelRequired: 1,
     wordRequired: 5,
     starRequired: 1,
     tier: 0,
-    description: '产出木材，所有木材建筑产量+1'
+    description: '产出木材，所有木材建筑产量+1，容量: 🪵100'
   },
   {
     id: 'cottage',
@@ -45,12 +46,13 @@ export const BUILDINGS = [
     spriteIndex: 2,
     cost: { gold: 50, wood: 30, stone: 10 },
     income: { gold: 2 },
+    capacity: { gold: 200 },
     buff: { type: 'streakGold', value: 10, description: '连续3天打卡额外+10金币' },
     levelRequired: 1,
     wordRequired: 10,
     starRequired: 2,
     tier: 0,
-    description: '有人居住的屋子，连续打卡额外金币'
+    description: '有人居住的屋子，连续打卡额外金币，容量: 🪙200'
   },
 
   // ── T1 ──
@@ -75,12 +77,13 @@ export const BUILDINGS = [
     spriteIndex: 4,
     cost: { gold: 50, wood: 20 },
     income: { stone: 1 },
+    capacity: { stone: 80 },
     buff: { type: 'stoneBonus', value: 1, description: '所有石材建筑产量+1' },
     levelRequired: 2,
     wordRequired: 50,
-    starRequired: 10,
+    starRequired: 8,
     tier: 1,
-    description: '产出石材，所有石材建筑产量+1'
+    description: '产出石材，所有石材建筑产量+1，容量: 🪨80'
   },
 
   // ── T2 ──
@@ -88,7 +91,7 @@ export const BUILDINGS = [
     id: 'dock',
     name: '码头',
     icon: '⚓',
-    spriteIndex: null,
+    spriteIndex: 3,
     cost: { gold: 200, wood: 100, stone: 50 },
     income: { gold: 3 },
     buff: { type: 'unlockWater', value: 1, description: '解锁水地形可建造' },

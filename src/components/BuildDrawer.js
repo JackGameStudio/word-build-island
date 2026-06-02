@@ -37,6 +37,8 @@ export function createBuildDrawer(assets, getResources, getStars, vocab, islandL
   overlay.appendChild(panel);
 
   // ─── 渲染建筑列表 ───
+  const COST_ICONS = { gold: '🪙', wood: '🪵', stone: '🪨' };
+
   function render() {
     totalWords = countLearnedWords(vocab);
     const stars = getStars ? getStars() : 0;
@@ -50,13 +52,10 @@ export function createBuildDrawer(assets, getResources, getStars, vocab, islandL
       const info = document.createElement('div');
       info.style.cssText = 'flex:1;min-width:0;';
       const lvTag = building.levelRequired > 1 ? ` <span style="font-size:9px;color:#fbbf24;">Lv.${building.levelRequired}</span>` : '';
+      const costTag = Object.entries(building.cost).filter(([,v]) => v > 0).map(([k,v]) => `<span style="font-size:9px;color:#e2e8f0;">${COST_ICONS[k]}${v}</span>`).join('');
+      const wordTag = building.wordRequired > 0 ? ` <span style="font-size:9px;color:#fbbf24;">📖${building.wordRequired}</span>` : '';
       const starTag = building.starRequired > 0 ? ` <span style="font-size:9px;color:#fbbf24;">⭐${building.starRequired}</span>` : '';
-      info.innerHTML = `${building.icon} <b>${building.name}</b>${lvTag}${starTag} <span style="font-size:10px;color:var(--color-muted);">${building.description}</span>`;
-
-      // 花费（含 ⭐）
-      const costEl = document.createElement('div');
-      costEl.style.cssText = 'font-size:10px;color:var(--color-muted);min-width:80px;';
-      costEl.textContent = formatCost(building.cost, building.starRequired);
+      info.innerHTML = `${building.icon} <b>${building.name}</b>${lvTag} ${costTag}${wordTag}${starTag} <span style="font-size:10px;color:var(--color-muted);">${building.description}</span>`;
 
       // 建造按钮
       const btn = document.createElement('button');
@@ -86,19 +85,12 @@ export function createBuildDrawer(assets, getResources, getStars, vocab, islandL
         onBuild?.(building);
       };
 
-      row.append(info, costEl, btn);
+      row.append(info, btn);
       grid.appendChild(row);
     });
   }
 
   function setLevel(lv) { localLevel = lv; titleEl.textContent = `建造  Lv.${lv}`; }
-
-  function formatCost(cost, starReq) {
-    const icons = { gold: '🪙', wood: '🪵', stone: '🪨' };
-    let s = Object.entries(cost).map(([k, v]) => `${icons[k]}${v}`).join(' ');
-    if (starReq > 0) s += ` ⭐${starReq}`;
-    return s;
-  }
 
   // ─── 事件 ───
   closeBtn.onclick = () => hide();

@@ -31,8 +31,12 @@ export function createPickupSystem(terrainMap = null) {
 
   // ─── 渲染函数引用（由 island-engine 设置）───
   let renderFn = null;
+  let iconsImg = null; // icons spritesheet
+  const STONE_ICON_COL = 3; // icons.png 第 4 列（0-based）是石头
+  const ICON_SIZE = 24;     // icons.png 单格尺寸
 
   function setRenderFn(fn) { renderFn = fn; }
+  function setRockImage(img) { iconsImg = img; }
 
   // ─── 获取所有石地砖坐标 ───
   function getStoneTiles() {
@@ -59,10 +63,10 @@ export function createPickupSystem(terrainMap = null) {
   function trySpawn(todayDate, buildings = []) {
     if (todayDate === lastSpawnDate) return 0;
     lastSpawnDate = todayDate;
-    lastSpawnTime = Date.now();
+    lastSpawnTime = performance.now();
 
     // 清理过期物品
-    const now = Date.now();
+    const now = performance.now();
     items = items.filter(it => (now - it.createdAt) < EXPIRE_HOURS * 3600 * 1000);
 
     // 还能放几个？
@@ -121,43 +125,51 @@ export function createPickupSystem(terrainMap = null) {
   }
 
   // ─── 渲染拾取物到 Canvas ───
-  function render(ctx, offsetX, offsetY, cellSize, timeMs) {
+  // 动画：光晕脉冲 + 缩小弹跳
+  function render(ctx, _ox, _oy, cellSize, timeMs) {
     items.forEach(it => {
       const def = ITEM_DEFS[it.type];
       if (!def) return;
 
-      const cx = it.gx * cellSize + offsetX + cellSize / 2;
-      const cy = it.gy * cellSize + offsetY + cellSize / 2;
-      const r = cellSize * 0.25; // 16px on 64px grid
+      const gx = it.gx * cellSize;
+      const gy = it.gy * cellSize;
+      const baseX = gx + (cellSize - ICON_SIZE) / 2;
+      const baseY = gy + (cellSize - ICON_SIZE) / 2;
 
-      // 脉冲动画
-      const elapsed = timeMs - it.createdAt;
-      const pulse = 1 + 0.15 * Math.sin(elapsed * 0.003); // ~2s 周期
+      const elapsed = Math.max(0, timeMs - it.createdAt);
+
+      // 光晕脉冲：圆环从中心扩散渐隐
+      const glowPhase = (elapsed * 0.0012) % 1;
+      const glowR = 10 + glowPhase * 16;
+      const glowAlpha = (1 - glowPhase) * 0.15;
 
       ctx.save();
-
-      // 发光光晕
-      ctx.globalAlpha = 0.25 + 0.1 * Math.sin(elapsed * 0.005);
-      ctx.fillStyle = def.glow;
+      ctx.fillStyle = '#a0a0a0';
+      ctx.globalAlpha = glowAlpha;
       ctx.beginPath();
-      ctx.arc(cx, cy, r * 1.6 * pulse, 0, Math.PI * 2);
+      ctx.arc(baseX + ICON_SIZE / 2, baseY + ICON_SIZE / 2, glowR, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
 
-      // 主体圆
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = '#7f8c8d';
-      ctx.beginPath();
-      ctx.arc(cx, cy, r * pulse, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
+      // 缩小弹跳：scale 1.0 → 0.9 → 1.0，abs(sin) 形成锐利弹跳节奏
+      const bounce = 1 - 0.1 * Math.abs(Math.sin(elapsed * 0.0035));
 
-      // 图标
-      ctx.font = `${cellSize * 0.35}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(def.icon, cx, cy);
+      ctx.save();
+      const cx = baseX + ICON_SIZE / 2;
+      const cy = baseY + ICON_SIZE / 2;
+      ctx.translate(cx, cy);
+      ctx.scale(bounce, bounce);
+
+      if (iconsImg) {
+        ctx.drawImage(iconsImg,
+          STONE_ICON_COL * ICON_SIZE, 0, ICON_SIZE, ICON_SIZE,
+          -ICON_SIZE / 2, -ICON_SIZE / 2, ICON_SIZE, ICON_SIZE);
+      } else {
+        ctx.fillStyle = '#7f8c8d';
+        ctx.beginPath();
+        ctx.arc(0, 0, 8, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
       ctx.restore();
     });
@@ -185,7 +197,14 @@ export function createPickupSystem(terrainMap = null) {
 
   function loadState(state) {
     if (!state) return;
-    items = (state.items || []).map(it => ({ ...it }));
+    // 兼容旧存档中 Date.now() 时间戳，转换为 performance.now() 等效值
+    const BASE_OFFSET = Date.now() - performance.now();
+    items = (state.items || []).map(it => {
+      if (it.createdAt && it.createdAt > 1e12) {
+        it.createdAt = it.createdAt - BASE_OFFSET;
+      }
+      return { ...it };
+    });
     lastSpawnDate = state.lastSpawnDate || '';
     lastSpawnTime = state.lastSpawnTime || 0;
     // 从最大 id 恢复计数器
@@ -208,6 +227,7 @@ export function createPickupSystem(terrainMap = null) {
     hitTest,
     render,
     setRenderFn,
+    setRockImage,
     getState,
     loadState,
     setOnPickup,
