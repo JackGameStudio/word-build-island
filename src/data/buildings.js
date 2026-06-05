@@ -58,8 +58,8 @@ export const BUILDINGS = [
   // ── T1 ──
   {
     id: 'garden',
-    name: '花园',
-    icon: '🌷',
+    name: '农田',
+    icon: '🌾',
     spriteIndex: null,
     cost: { gold: 100, wood: 50 },
     income: null,

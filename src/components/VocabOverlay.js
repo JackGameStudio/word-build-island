@@ -4,7 +4,7 @@
  * 模式自动决定：Box 1~3 固定选择题，Box 4~5 随机出现排字游戏
  */
 
-import { getDueWords, gradeWord, getQuizOptions } from '../core/vocab-engine.js';
+import { getDueWords, gradeWord, getQuizOptions, getWordOptions } from '../core/vocab-engine.js';
 import { rewardForReview, mergeResources } from '../core/economy.js';
 import { transition } from '../core/state.js';
 import { AppState, getRank } from '../data/constants.js';
@@ -12,7 +12,8 @@ import { speakWord, speakEnglish, stopSpeaking } from '../core/tts.js';
 
 const MODE = {
   CHOICE: 'choice',
-  SPELLING: 'spelling'
+  SPELLING: 'spelling',
+  FILL_BLANK: 'fill_blank'
 };
 
 export function createVocabOverlay(assets, vocabArray, onSessionComplete, getBuffs = () => ({}), getEffectiveNow = () => Date.now(), onStarEarned = () => {}, starEcon = null) {
@@ -23,6 +24,9 @@ export function createVocabOverlay(assets, vocabArray, onSessionComplete, getBuf
   let mode = MODE.CHOICE;
   let allSessionWords = [];
   let sessionResults = []; // [{box, quality}]
+  let answerLocked = false;
+  let nextTimer = null;
+  let sessionFinished = false;
 
   // ─── DOM 结构 ───
   const overlay = document.createElement('div');
@@ -154,14 +158,18 @@ export function createVocabOverlay(assets, vocabArray, onSessionComplete, getBuf
   let spellAnswer  = [];
   let spellPool    = [];
 
-  // ─── 自动决定模式（Box 4~5 随机出排字）──
+  // ─── 自动决定模式 ──
+  // Box 1: 选择题 | Box 2~3: 选择题/填空题 | Box 4~5: 选择题/填空题/排字
   function autoDecideMode() {
     if (!currentWord) return;
     const box = currentWord.box || 1;
-    if (box >= 4 && Math.random() < 0.5) {
-      mode = MODE.SPELLING;
-    } else {
+    if (box === 1) {
       mode = MODE.CHOICE;
+    } else if (box <= 3) {
+      mode = Math.random() < 0.5 ? MODE.CHOICE : MODE.FILL_BLANK;
+    } else {
+      const r = Math.random();
+      mode = r < 0.33 ? MODE.CHOICE : r < 0.66 ? MODE.FILL_BLANK : MODE.SPELLING;
     }
   }
 
@@ -177,6 +185,9 @@ export function createVocabOverlay(assets, vocabArray, onSessionComplete, getBuf
     currentIndex = 0;
     sessionRewards = {};
     sessionResults = [];
+    sessionFinished = false;
+    answerLocked = false;
+    clearTimeout(nextTimer);
     overlay.style.display = 'block';
     requestAnimationFrame(() => {
       overlay.classList.add('visible');
@@ -214,14 +225,38 @@ export function createVocabOverlay(assets, vocabArray, onSessionComplete, getBuf
   // ─── 渲染当前题目 ───
   function renderCurrentQuestion() {
     const isChoice = mode === MODE.CHOICE;
+    const isFillBlank = mode === MODE.FILL_BLANK;
 
-    answerArea.style.display  = isChoice ? '' : 'none';
-    spellArea.style.display   = isChoice ? 'none' : 'flex';
+    answerArea.style.display  = (isChoice || isFillBlank) ? '' : 'none';
+    spellArea.style.display   = (isChoice || isFillBlank) ? 'none' : 'flex';
     meaningEl.style.display  = 'none';
 
-    if (isChoice) {
+    if (isFillBlank) {
+      wordEl.style.display = '';
+      const sentence = currentWord.sentence || `The word is ___`;
+      wordEl.textContent = sentence;
+      wordEl.style.fontSize = '15px';
+      wordEl.style.color = 'var(--color-light)';
+      wordEl.style.textAlign = 'left';
+      wordEl.style.lineHeight = '1.6';
+
+      const options = getWordOptions(currentWord, vocabArray);
+      answerArea.innerHTML = '';
+      options.forEach((opt) => {
+        const btn = document.createElement('button');
+        btn.className = 'btn-pixel';
+        btn.textContent = opt;
+        btn.style.fontSize = '13px';
+        btn.onclick = () => handleFillBlankAnswer(opt, btn);
+        answerArea.appendChild(btn);
+      });
+    } else if (isChoice) {
       wordEl.textContent = currentWord.word;
       wordEl.style.display = '';
+      wordEl.style.fontSize = '';
+      wordEl.style.color = '';
+      wordEl.style.textAlign = '';
+      wordEl.style.lineHeight = '';
       const options = getQuizOptions(currentWord, allSessionWords);
       answerArea.innerHTML = '';
       options.forEach((opt) => {
@@ -234,6 +269,10 @@ export function createVocabOverlay(assets, vocabArray, onSessionComplete, getBuf
       });
     } else {
       wordEl.style.display = '';
+      wordEl.style.fontSize = '';
+      wordEl.style.color = '';
+      wordEl.style.textAlign = '';
+      wordEl.style.lineHeight = '';
       wordEl.textContent = currentWord.meaning;
       meaningEl.style.display = '';
       meaningEl.textContent = `🔤 ${currentWord.word.length} 个字母 · 点选字母排列成单词`;
@@ -299,6 +338,12 @@ export function createVocabOverlay(assets, vocabArray, onSessionComplete, getBuf
     processAnswer(isCorrect, btnEl, selectedMeaning !== currentWord.meaning ? currentWord.meaning : null);
   }
 
+  // ─── 填空题答题 ───
+  function handleFillBlankAnswer(selectedWord, btnEl) {
+    const isCorrect = selectedWord === currentWord.word;
+    processAnswer(isCorrect, btnEl, selectedWord !== currentWord.word ? currentWord.word : null);
+  }
+
   // ─── 排字游戏提交 ───
   function handleSpellSubmit() {
     if (spellAnswer.length === 0) return;
@@ -313,6 +358,20 @@ export function createVocabOverlay(assets, vocabArray, onSessionComplete, getBuf
 
   // ─── 通用答题处理 ───
   function processAnswer(isCorrect, el, correctAnswer) {
+    if (answerLocked) return;
+    answerLocked = true;
+    clearTimeout(nextTimer);
+
+    // 禁用所有选项/字母按钮
+    if (mode === MODE.CHOICE || mode === MODE.FILL_BLANK) {
+      Array.from(answerArea.children).forEach(b => { b.disabled = true; b.style.pointerEvents = 'none'; });
+    } else {
+      spellSubmit.disabled = true;
+      spellClear.disabled = true;
+      answerRow.querySelectorAll('button').forEach(b => { b.disabled = true; b.style.pointerEvents = 'none'; });
+      letterPool.querySelectorAll('button').forEach(b => { b.disabled = true; b.style.pointerEvents = 'none'; });
+    }
+
     const quality = isCorrect ? 5 : 1;
     sessionResults.push({ box: currentWord.box || 1, quality });
 
@@ -323,6 +382,17 @@ export function createVocabOverlay(assets, vocabArray, onSessionComplete, getBuf
 
     if (isCorrect) {
       el.style.background = '#4ade80';
+      // 锁定按钮尺寸 + 显示 ✅，避免版面跳动
+      const ow = el.offsetWidth;
+      const oh = el.offsetHeight;
+      el.style.width = ow + 'px';
+      el.style.height = oh + 'px';
+      el.style.padding = '0';
+      el.style.display = 'flex';
+      el.style.justifyContent = 'center';
+      el.style.alignItems = 'center';
+      el.style.fontSize = '20px';
+      el.style.fontWeight = 'bold';
       el.textContent = '✅';
 
       if (mode === MODE.SPELLING) {
@@ -353,38 +423,67 @@ export function createVocabOverlay(assets, vocabArray, onSessionComplete, getBuf
       if (mode === MODE.SPELLING) {
         answerRow.querySelectorAll('button').forEach(b => b.style.background = '#f87171');
         letterPool.querySelectorAll('button').forEach(b => b.style.background = '#f87171');
-      } else {
-        el.classList.add('shake');
-      }
-
-      if (correctAnswer) {
-        if (mode === MODE.SPELLING) {
+        if (correctAnswer) {
           const hint = document.createElement('div');
           hint.style.cssText = 'font-size:30px;color:#4ade80;margin-bottom:8px;text-align:center;font-weight:bold;';
           hint.textContent = `正确答案：${correctAnswer}`;
           spellArea.insertBefore(hint, answerRow);
           setTimeout(() => hint.remove(), 10200);
-        } else {
+        }
+      } else {
+        el.classList.add('shake');
+        // 答错反馈：锁定按钮尺寸 + 显示 ❌，避免版面跳动
+        const origW = el.offsetWidth;
+        const origH = el.offsetHeight;
+        const origText = el.textContent;
+        const origFontSize = el.style.fontSize;
+        el.style.width = origW + 'px';
+        el.style.height = origH + 'px';
+        el.style.padding = '0';
+        el.style.display = 'flex';
+        el.style.justifyContent = 'center';
+        el.style.alignItems = 'center';
+        el.style.fontSize = '20px';
+        el.style.fontWeight = 'bold';
+        el.textContent = '❌';
+        if (correctAnswer) {
           const correctBtn = Array.from(answerArea.children)
             .find(b => b.textContent === correctAnswer);
-          if (correctBtn) correctBtn.style.background = '#4ade80';
+          if (correctBtn) {
+            setTimeout(() => {
+              el.style.width = '';
+              el.style.height = '';
+              el.style.padding = '';
+              el.style.display = '';
+              el.style.justifyContent = '';
+              el.style.alignItems = '';
+              el.style.fontSize = origFontSize || '11px';
+              el.style.fontWeight = '';
+              el.textContent = origText;
+              correctBtn.style.background = '#4ade80';
+              correctBtn.style.fontWeight = 'bold';
+            }, 600);
+          }
         }
       }
     }
 
     stopSpeaking();
 
-    setTimeout(() => {
+    nextTimer = setTimeout(() => {
+      answerLocked = false;
       currentIndex++;
       if (currentIndex >= allSessionWords.length) {
         finishSession();
       } else {
         showCurrentQuestion();
       }
-    }, isCorrect ? 800 : 10200);
+    }, isCorrect ? 800 : (mode === MODE.SPELLING ? 10200 : 2000));
   }
 
   function finishSession() {
+    if (sessionFinished) return;
+    sessionFinished = true;
     const totalReward = { ...sessionRewards };
     hide();
     setTimeout(() => onSessionComplete?.(totalReward, allSessionWords, sessionResults), 350);

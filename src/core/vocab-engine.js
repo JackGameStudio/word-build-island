@@ -39,6 +39,7 @@ export function gradeWord(word, quality, now = Date.now()) {
       box: quality === 0 ? 1 : Math.max(1, word.box - 1),
       nextReview: quality === 0 ? null : now + 86400000,
       ef: newEf,
+      learnedAt: word.learnedAt || now,
       timesReviewed: word.timesReviewed + 1
     };
   }
@@ -69,6 +70,20 @@ export function getQuizOptions(correctWord, vocab) {
     .slice(0, 3)
     .map(w => w.meaning);
   const options = [correctWord.meaning, ...others];
+  for (let i = options.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [options[i], options[j]] = [options[j], options[i]];
+  }
+  return options;
+}
+
+export function getWordOptions(correctWord, vocab) {
+  const others = vocab
+    .filter(w => w.word !== correctWord.word)
+    .sort(() => Math.random() - 0.5)
+    .slice(0, 3)
+    .map(w => w.word);
+  const options = [correctWord.word, ...others];
   for (let i = options.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [options[i], options[j]] = [options[j], options[i]];

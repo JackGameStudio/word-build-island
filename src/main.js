@@ -18,11 +18,10 @@ import { createTreasureChest } from './components/TreasureChest.js';
 import { createSettingsPanel } from './components/SettingsPanel.js';
 import { createRoadmapPanel } from './components/RoadmapPanel.js';
 import { createToast } from './components/Toast.js';
-import { createAchievementsPanel } from './components/AchievementsPanel.js';
+import { createTutorialGuide } from './components/TutorialGuide.js';
 import { transition, getState } from './core/state.js';
 import { STARTING_RESOURCES, ECONOMY_TICK, CELL_SIZE, AppState, DEFAULT_ISLAND_TERRAIN } from './data/constants.js';
 import { getBuildingById, countLearnedWords } from './data/buildings.js';
-import { checkAchievements } from './data/achievements.js';
 
 async function bootstrap() {
   // ─── 0. 预加载图片 ───
@@ -77,7 +76,6 @@ async function bootstrap() {
 
   const app = document.getElementById('app');
   const toast = createToast();
-  const achievementsPanel = createAchievementsPanel();
 
   // 资源栏
   const resourceBar = createResourceBar(assets);
@@ -234,26 +232,6 @@ async function bootstrap() {
     }
   }
 
-  // ─── 成就检查 ───
-  function checkAchievementsForStats() {
-    const stats = {
-      buildings: data.island.buildings.length,
-      wordsCorrect: data.stats.wordsCorrect,
-      tickIncomeCount: data.stats.tickIncomeCount
-    };
-    const newAchs = checkAchievements(stats, data.achievements);
-    newAchs.forEach(a => {
-      data.achievements.push(a.id);
-      toast.show(`${a.icon} 成就解锁: ${a.name}！\n${a.desc}`, 3000);
-      if (a.reward) {
-        data.resources = mergeResources(data.resources, a.reward);
-        if (a.reward.star) animateStarReward(a.reward.star);
-        resourceBar.update(data.resources, data.island.level);
-      }
-    });
-    updateLevel();
-  }
-
   // 笔记式计数 — 背词过程中实时累加
   const onStarEarned = (count) => {
     data.resources = mergeResources(data.resources, { star: count });
@@ -273,7 +251,6 @@ async function bootstrap() {
       resourceBar.update(data.resources, data.island.level);
       animateStarReward(1);
     }
-    checkAchievementsForStats();
     saveGameData(data);
     treasureChest.show(rewards, data.vocabulary);
   }, undefined, getEffectiveNow, onStarEarned, starEcon);
@@ -363,8 +340,15 @@ async function bootstrap() {
         const bldName = CAPACITY_BUILDERS[k] || '';
         toast.show(`${icon} 容量已满，多建${bldName}扩容`, 2500);
       }
-      checkAchievementsForStats();
       saveGameData(data);
+      // 新手引导 step 1：背完 5 词后触发
+      if (!tutStep1Done) {
+        const learned = data.vocabulary.filter(w => w.learnedAt !== null).length;
+        if (learned >= 5) {
+          tutStep1Done = true;
+          setTimeout(() => tutorial.show(1), 600);
+        }
+      }
     });
   });
   app.appendChild(treasureChest.element);
@@ -471,7 +455,6 @@ async function bootstrap() {
     }
   );
   app.appendChild(buildDrawer.element);
-  app.appendChild(achievementsPanel.element);
 
   // ─── 拾取物点击事件 ───
   pickupSystem.setOnPickup((reward) => {
@@ -527,6 +510,12 @@ async function bootstrap() {
     island.addBuilding(newBuilding);
     data.island.buildings = island.getBuildings();
 
+    // 新手引导 step 2：放下第一个建筑
+    if (!tutStep2Done && data.island.buildings.length === 1) {
+      tutStep2Done = true;
+      setTimeout(() => tutorial.show(2), 800);
+    }
+
     resourceBar.update(data.resources, data.island.level);
     toast.show(`${previewBuilding.icon} ${previewBuilding.name} 建成！`);
     // Roadmap 里程碑奖励
@@ -536,7 +525,6 @@ async function bootstrap() {
       animateStarReward(1);
     }
     saveGameData(data);
-    checkAchievementsForStats();
     cancelPreview();
   });
 
@@ -590,16 +578,9 @@ async function bootstrap() {
     location.reload();
   };
 
-  const achBtn = document.createElement('button');
-  achBtn.className = 'btn-pixel';
-  achBtn.textContent = '🏆 成就';
-  achBtn.onclick = () => {
-    achievementsPanel.show(data.achievements);
-  };
-
   const roadmapBtn = document.createElement('button');
   roadmapBtn.className = 'btn-pixel';
-  roadmapBtn.textContent = '🗺️ 路线';
+  roadmapBtn.textContent = '🗺️ 星图';
   roadmapBtn.onclick = () => {
     roadmapPanel.show(data.island.buildings, data.vocabulary, data.resources.star || 0);
   };
@@ -611,8 +592,21 @@ async function bootstrap() {
     settingsPanel.show(data.timeOffset);
   };
 
-  buttonBar.append(vocabBtn, buildBtn, achBtn, roadmapBtn, settingsBtn, resetBtn);
+  buttonBar.append(vocabBtn, buildBtn, roadmapBtn, settingsBtn, resetBtn);
   app.appendChild(buttonBar);
+
+  // ─── 新手引导（RPG 对话框 + 事件驱动，仅新游戏）───
+  let tutorial = null;
+  let tutStep1Done = true;
+  let tutStep2Done = true;
+  if (isNewGame) {
+    tutorial = createTutorialGuide('/src/assets/images/IslandMaster.png',
+      () => ({ vocabBtn, buildBtn, roadmapBtn })
+    );
+    tutStep1Done = false;
+    tutStep2Done = false;
+    setTimeout(() => tutorial.show(0), 800);
+  }
 
   // ─── 5. 更新资源栏 ───
   resourceBar.update(data.resources, data.island.level);
@@ -700,7 +694,6 @@ async function bootstrap() {
         toast.show(`${icon} 容量已满，多建${bldName}扩容`, 2500);
       }
       if (breakdown.length > 0) animateTickIncome(breakdown);
-      checkAchievementsForStats();
       updateLevel();
     }
   }, ECONOMY_TICK);
