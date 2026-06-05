@@ -70,8 +70,14 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
       }
     }
 
-    // 建筑 sprite
-    buildings.forEach(b => {
+    // 建筑 sprite（按 layer + y 排序，layer 越小越靠后，同层按 y 从远到近）
+    const sorted = [...buildings].sort((a, b) => {
+      const la = a.layer ?? 1;
+      const lb = b.layer ?? 1;
+      if (la !== lb) return la - lb;
+      return a.y - b.y;
+    });
+    sorted.forEach(b => {
       if (b.id === 'tree' && assets.treeSheet) {
         const variant = b.treeVariant ?? 0;
         ctx.drawImage(assets.treeSheet,

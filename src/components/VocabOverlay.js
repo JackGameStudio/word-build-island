@@ -8,6 +8,7 @@ import { getDueWords, gradeWord, getQuizOptions, getWordOptions } from '../core/
 import { rewardForReview, mergeResources } from '../core/economy.js';
 import { transition } from '../core/state.js';
 import { AppState, getRank } from '../data/constants.js';
+import { play as playSound } from '../core/sound.js';
 import { speakWord, speakEnglish, stopSpeaking } from '../core/tts.js';
 
 const MODE = {
@@ -381,6 +382,7 @@ export function createVocabOverlay(assets, vocabArray, onSessionComplete, getBuf
     }
 
     if (isCorrect) {
+      playSound('answer_correct');
       el.style.background = '#4ade80';
       // 锁定按钮尺寸 + 显示 ✅，避免版面跳动
       const ow = el.offsetWidth;
@@ -419,6 +421,7 @@ export function createVocabOverlay(assets, vocabArray, onSessionComplete, getBuf
       }
 
     } else {
+      playSound('answer_wrong');
       el.style.background = '#f87171';
       if (mode === MODE.SPELLING) {
         answerRow.querySelectorAll('button').forEach(b => b.style.background = '#f87171');

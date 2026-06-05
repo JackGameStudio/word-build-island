@@ -22,6 +22,7 @@ import { createTutorialGuide } from './components/TutorialGuide.js';
 import { transition, getState } from './core/state.js';
 import { STARTING_RESOURCES, ECONOMY_TICK, CELL_SIZE, AppState, DEFAULT_ISLAND_TERRAIN } from './data/constants.js';
 import { getBuildingById, countLearnedWords } from './data/buildings.js';
+import { play as playSound } from './core/sound.js';
 
 async function bootstrap() {
   // ─── 0. 预加载图片 ───
@@ -227,6 +228,7 @@ async function bootstrap() {
     if (newLevel > data.island.level) {
       data.island.level = newLevel;
       buildDrawer.setLevel(newLevel);
+      playSound('level_up');
       toast.show(`🎉 岛屿升级！Lv.${newLevel}`, 2500);
       resourceBar.update(data.resources, data.island.level);
     }
@@ -234,6 +236,7 @@ async function bootstrap() {
 
   // 笔记式计数 — 背词过程中实时累加
   const onStarEarned = (count) => {
+    playSound('star_earned');
     data.resources = mergeResources(data.resources, { star: count });
     resourceBar.update(data.resources, data.island.level);
     animateStarReward(count);
@@ -329,6 +332,7 @@ async function bootstrap() {
 
   // ─── 宝箱系统 ───
   const treasureChest = createTreasureChest((rewards) => {
+    playSound('chest_open');
     console.log('[treasureChest onComplete] rewards:', JSON.stringify(rewards));
     animateRewardFly(rewards, () => {
       data.resources = mergeResources(data.resources, rewards);
@@ -458,6 +462,7 @@ async function bootstrap() {
 
   // ─── 拾取物点击事件 ───
   pickupSystem.setOnPickup((reward) => {
+    playSound('pickup_item');
     data.resources = mergeResources(data.resources, reward);
     resourceBar.update(data.resources, data.island.level);
     toast.show(`🪨 拾取石材 +${reward.stone}！`);
@@ -501,6 +506,7 @@ async function bootstrap() {
       name: previewBuilding.name,
       icon: previewBuilding.icon,
       spriteIndex: previewBuilding.spriteIndex,
+      layer: previewBuilding.layer ?? 1,
       x, y
     };
     if (previewBuilding.id === 'tree') {
@@ -517,6 +523,7 @@ async function bootstrap() {
     }
 
     resourceBar.update(data.resources, data.island.level);
+    playSound('build_place');
     toast.show(`${previewBuilding.icon} ${previewBuilding.name} 建成！`);
     // Roadmap 里程碑奖励
     if (checkRoadmapRewards(previewBuilding.id)) {
@@ -548,6 +555,7 @@ async function bootstrap() {
   vocabBtn.className = 'btn-pixel';
   vocabBtn.textContent = '📖 背词';
   vocabBtn.onclick = () => {
+    playSound('button_click');
     if (transition(AppState.VOCAB)) vocabOverlay.show();
   };
 
@@ -555,6 +563,7 @@ async function bootstrap() {
   buildBtn.className = 'btn-pixel';
   buildBtn.textContent = '🏗️ 建造';
   buildBtn.onclick = () => {
+    playSound('button_click');
     if (transition(AppState.BUILD)) {
       buildDrawer.refresh();
       buildDrawer.show();
@@ -589,6 +598,7 @@ async function bootstrap() {
   settingsBtn.className = 'btn-pixel';
   settingsBtn.textContent = '⚙️ 设置';
   settingsBtn.onclick = () => {
+    playSound('button_click');
     settingsPanel.show(data.timeOffset);
   };
 
@@ -675,6 +685,7 @@ async function bootstrap() {
     toast.show(`🕐 离线 ${timeAgo}\n收获: ${desc}`, 3000);
   }
   if (!isNewGame) {
+    playSound('streak_fire');
     const rewardText = streakReward ? ` 奖励: ${formatIncome(streakReward)}` : '';
     toast.show(`🔥 连续打卡 ${data.stats.streak} 天！${rewardText}`, 2500);
   }
@@ -693,6 +704,7 @@ async function bootstrap() {
         const bldName = CAPACITY_BUILDERS[k] || '';
         toast.show(`${icon} 容量已满，多建${bldName}扩容`, 2500);
       }
+      playSound('tick_income');
       if (breakdown.length > 0) animateTickIncome(breakdown);
       updateLevel();
     }

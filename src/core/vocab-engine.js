@@ -79,7 +79,7 @@ export function getQuizOptions(correctWord, vocab) {
 
 export function getWordOptions(correctWord, vocab) {
   const others = vocab
-    .filter(w => w.word !== correctWord.word)
+    .filter(w => w.word !== correctWord.word && !w.word.startsWith('test_'))
     .sort(() => Math.random() - 0.5)
     .slice(0, 3)
     .map(w => w.word);
