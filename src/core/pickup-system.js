@@ -176,11 +176,12 @@ export function createPickupSystem(terrainMap = null) {
   }
 
   // ─── 命中测试 ───
-  function hitTest(screenX, screenY, offsetX, offsetY, cellSize) {
+  function hitTest(screenX, screenY, offsetX, offsetY, cellSize, scale = 1) {
+    const cs = cellSize * scale;
     for (const it of items) {
-      const cx = it.gx * cellSize + offsetX + cellSize / 2;
-      const cy = it.gy * cellSize + offsetY + cellSize / 2;
-      const r = cellSize * 0.3;
+      const cx = it.gx * cs + offsetX + cs / 2;
+      const cy = it.gy * cs + offsetY + cs / 2;
+      const r = cs * 0.3;
       const dx = screenX - cx;
       const dy = screenY - cy;
       if (dx * dx + dy * dy <= r * r) {

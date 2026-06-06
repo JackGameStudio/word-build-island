@@ -332,7 +332,6 @@ async function bootstrap() {
 
   // ─── 宝箱系统 ───
   const treasureChest = createTreasureChest((rewards) => {
-    playSound('chest_open');
     console.log('[treasureChest onComplete] rewards:', JSON.stringify(rewards));
     animateRewardFly(rewards, () => {
       data.resources = mergeResources(data.resources, rewards);
@@ -390,6 +389,18 @@ async function bootstrap() {
   let previewBuilding = null;
   let cancelBarEl = null;
 
+  // 移动模式
+  let isMoveMode = false;
+  let isMovePinned = false; // 松开后冻结幽灵
+  let longPressTimer = null;
+  let longPressStartPos = null;
+
+  // 移动后防误触
+  let justMoved = false;
+
+  // 拆除确认弹窗
+  let demolishBarEl = null;
+
   // 浮动取消栏（幽灵预览时显示）
   function showCancelBar(building) {
     if (!cancelBarEl) {
@@ -422,19 +433,155 @@ async function bootstrap() {
     if (getState() === AppState.PREVIEW) transition(AppState.IDLE);
   }
 
+  // ─── 移动建筑 ───
+  function enterMoveMode(buildingIndex) {
+    if (!island.startMoveBuilding(buildingIndex)) return;
+    isMoveMode = true;
+    isMovePinned = false;
+    hideDemolishBar();
+
+    const b = island.getMoveBuilding();
+    if (!b) return;
+    islandContainer.style.cursor = 'none';
+
+    if (!cancelBarEl) {
+      cancelBarEl = document.createElement('div');
+      cancelBarEl.style.cssText = `
+        position:absolute; bottom:60px; left:50%; transform:translateX(-50%);
+        display:flex; gap:8px; padding:8px 16px;
+        background:var(--color-surface); border:2px solid #555;
+        z-index:25; font-size:11px;
+      `;
+    }
+    cancelBarEl.innerHTML = `
+      <span>${b.icon || ''} ${b.name || b.id} — 拖到新位置后松开</span>
+      <button class="btn-pixel" id="confirm-move" style="font-size:11px;padding:2px 8px;min-width:auto;">✓ 放置</button>
+      <button class="btn-pixel" id="cancel-build" style="font-size:11px;padding:2px 8px;min-width:auto;">✕ 取消</button>
+    `;
+    islandContainer.appendChild(cancelBarEl);
+    cancelBarEl.querySelector('#confirm-move').onclick = () => {
+      confirmMovePlacement();
+    };
+    cancelBarEl.querySelector('#cancel-build').onclick = () => {
+      island.cancelMoveBuilding();
+      cancelMoveUI();
+    };
+    cancelBarEl.style.display = 'flex';
+  }
+
+  function cancelMoveUI() {
+    isMoveMode = false;
+    isMovePinned = false;
+    justMoved = true;
+    islandContainer.style.cursor = '';
+    hideCancelBar();
+  }
+
+  // 点击"放置"按钮确认移动
+  function confirmMovePlacement() {
+    if (!island.isMoving()) return;
+    const ghost = island.getGhost();
+    const b = island.getMoveBuilding();
+    if (!ghost) {
+      island.cancelMoveBuilding();
+      cancelMoveUI();
+      return;
+    }
+    if (!ghost.valid) {
+      toast.show('此处无法放置');
+      return;
+    }
+    b.x = ghost.gx;
+    b.y = ghost.gy;
+    island.cancelMoveBuilding();
+    data.island.buildings = island.getBuildings();
+    playSound('build_place');
+    toast.show(`${b.icon || ''} ${b.name || b.id} 已移动`);
+    saveGameData(data);
+    cancelMoveUI();
+  }
+
+  // ─── 拆除确认弹窗 ───
+  function showDemolishConfirm(building, index) {
+    if (!demolishBarEl) {
+      demolishBarEl = document.createElement('div');
+      demolishBarEl.style.cssText = `
+        position:absolute; bottom:60px; left:50%; transform:translateX(-50%);
+        display:flex; gap:8px; padding:8px 16px;
+        background:var(--color-surface); border:2px solid #e55;
+        z-index:25; font-size:11px;
+      `;
+    }
+    demolishBarEl.innerHTML = `
+      <span>确认拆除 ${building.icon || ''} ${building.name || building.id}？（返还 50% 资源）</span>
+      <button class="btn-pixel" id="confirm-demolish" style="font-size:11px;padding:2px 8px;min-width:auto;border-color:#e55;">确认</button>
+      <button class="btn-pixel" id="cancel-demolish" style="font-size:11px;padding:2px 8px;min-width:auto;">取消</button>
+    `;
+    islandContainer.appendChild(demolishBarEl);
+    demolishBarEl.querySelector('#confirm-demolish').onclick = () => {
+      demolishBuilding(building, index);
+      hideDemolishBar();
+    };
+    demolishBarEl.querySelector('#cancel-demolish').onclick = hideDemolishBar;
+    demolishBarEl.style.display = 'flex';
+  }
+
+  function hideDemolishBar() {
+    if (demolishBarEl) demolishBarEl.style.display = 'none';
+  }
+
+  // ─── 拆除建筑 ───
+  function demolishBuilding(building, index) {
+    const bldDef = getBuildingById(building.id);
+    if (!bldDef) return;
+
+    // 返还 50% 资源
+    const refund = {};
+    Object.entries(bldDef.cost).forEach(([k, v]) => {
+      refund[k] = Math.floor(v * 0.5);
+    });
+
+    island.removeBuilding(index);
+    data.island.buildings = island.getBuildings();
+    data.resources = mergeResources(data.resources, refund);
+    resourceBar.update(data.resources, data.island.level);
+    playSound('build_demolish');
+    toast.show(`${building.icon || ''} ${building.name || building.id} 已拆除，返还 50% 资源`);
+    saveGameData(data);
+  }
+
   // 幽灵预览 — 鼠标/触摸跟随
   island.canvas.addEventListener('pointermove', (e) => {
-    if (getState() !== AppState.PREVIEW || !previewBuilding) return;
-    const rect = island.canvas.getBoundingClientRect();
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
-    const { x, y } = island.screenToGrid(sx, sy);
-    const inBounds = island.isInBounds(x, y);
-    const occupied = island.isOccupied(x, y);
-    const buildable = island.isBuildableFor(previewBuilding.id, x, y);
-    const affordable = canAfford(data.resources, previewBuilding.cost);
-    const valid = inBounds && !occupied && buildable && affordable;
-    island.setGhost(previewBuilding, x, y, valid);
+    // 常规建造预览
+    if (getState() === AppState.PREVIEW && previewBuilding) {
+      const rect = island.canvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const { x, y } = island.screenToGrid(sx, sy);
+      const inBounds = island.isInBounds(x, y);
+      const occupied = island.isOccupied(x, y);
+      const buildable = island.isBuildableFor(previewBuilding.id, x, y);
+      const affordable = canAfford(data.resources, previewBuilding.cost);
+      const valid = inBounds && !occupied && buildable && affordable;
+      island.setGhost(previewBuilding, x, y, valid);
+      return;
+    }
+
+    // 移动建筑预览
+    if (island.isMoving() && !isMovePinned) {
+      const rect = island.canvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const { x, y } = island.screenToGrid(sx, sy);
+      const b = island.getMoveBuilding();
+      if (!b) return;
+      const moveIdx = island.getMoveBuildingIndex();
+      const inBounds = island.isInBounds(x, y);
+      const occupied = island.isOccupied(x, y, moveIdx);
+      const buildable = island.isBuildableFor(b.id, x, y);
+      const isValid = inBounds && !occupied && buildable;
+      island.setGhost(b, x, y, isValid);
+    }
   });
 
   const buildDrawer = createBuildDrawer(
@@ -469,14 +616,27 @@ async function bootstrap() {
     saveGameData(data);
   });
 
-  // ─── 岛屿点击（拾取物检测 + 建造放置）───
+  // ─── 岛屿点击（拆除 + 拾取物检测 + 建造放置）───
   island.canvas.addEventListener('click', (e) => {
     if (island.wasPanning) { island.resetPanFlag(); return; }
+    if (justMoved) { justMoved = false; return; }
 
     const rect = island.canvas.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
     const { x, y } = island.screenToGrid(sx, sy);
+
+    // ─── 拆除建筑（点击弹出确认窗）───
+    if (getState() === AppState.IDLE && !isMoveMode) {
+      const buildingIdx = island.findBuildingAt(x, y);
+      if (buildingIdx >= 0) {
+        const building = island.getBuildings()[buildingIdx];
+        showDemolishConfirm(building, buildingIdx);
+        return;
+      }
+      // 点击空白处 → 关闭拆除确认窗
+      hideDemolishBar();
+    }
 
     // 拾取物检测（非预览模式）
     if (getState() !== AppState.PREVIEW) {
@@ -527,6 +687,7 @@ async function bootstrap() {
     toast.show(`${previewBuilding.icon} ${previewBuilding.name} 建成！`);
     // Roadmap 里程碑奖励
     if (checkRoadmapRewards(previewBuilding.id)) {
+      playSound('star_earned');
       toast.show(`⭐ Roadmap 里程碑达成！+1 星星`);
       resourceBar.update(data.resources, data.island.level);
       animateStarReward(1);
@@ -537,9 +698,68 @@ async function bootstrap() {
 
   // ESC 取消
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && getState() === AppState.PREVIEW) {
-      cancelPreview();
+    if (e.key === 'Escape') {
+      if (getState() === AppState.PREVIEW) cancelPreview();
+      if (island.isMoving()) { island.cancelMoveBuilding(); cancelMoveUI(); }
     }
+  });
+
+  // ─── 长按检测 → 移动建筑 ───
+  island.canvas.addEventListener('pointerdown', (e) => {
+    if (getState() !== AppState.IDLE || island.isMoving()) return;
+    // 拆除确认弹窗显示时禁止移动
+    if (demolishBarEl && demolishBarEl.style.display !== 'none') return;
+
+    const rect = island.canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const { x, y } = island.screenToGrid(sx, sy);
+    longPressStartPos = { gx: x, gy: y };
+
+    clearTimeout(longPressTimer);
+    longPressTimer = setTimeout(() => {
+      if (island.isMoving()) return;
+      if (getState() !== AppState.IDLE) return;
+      const idx = island.findBuildingAt(longPressStartPos.gx, longPressStartPos.gy);
+      if (idx >= 0) enterMoveMode(idx);
+    }, 500);
+  });
+
+  // 拖拽过程中清除长按计时
+  island.canvas.addEventListener('pointermove', (e) => {
+    if (island.wasPanning) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  });
+
+  // 松开 → 不再自动放置，停在当前位置等玩家确认
+  document.addEventListener('pointerup', (e) => {
+    if (!island.isMoving() || isMovePinned) return;
+
+    isMovePinned = true;
+    islandContainer.style.cursor = '';
+
+    // 松开时把幽灵固定在当前位置
+    const rect = island.canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const { x, y } = island.screenToGrid(sx, sy);
+    const b = island.getMoveBuilding();
+    if (b) {
+      const moveIdx = island.getMoveBuildingIndex();
+      const inBounds = island.isInBounds(x, y);
+      const occupied = island.isOccupied(x, y, moveIdx);
+      const buildable = island.isBuildableFor(b.id, x, y);
+      const isValid = inBounds && !occupied && buildable;
+      island.setGhost(b, x, y, isValid);
+    }
+  });
+
+  // Canvas 级 pointerup：仅处理非移动模式的收尾
+  island.canvas.addEventListener('pointerup', (e) => {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
   });
 
   // ─── 4. 底部按钮栏 ───
@@ -630,7 +850,7 @@ async function bootstrap() {
     buildingsWithIncome.forEach(b => {
       const screen = island.gridToScreen(b.x, b.y);
       const canvasRect = island.canvas.getBoundingClientRect();
-      const px = canvasRect.left + screen.x + CELL_SIZE / 2;
+      const px = canvasRect.left + screen.x + CELL_SIZE * island.getScale() / 2;
       const py = canvasRect.top + screen.y;
 
       const icons = { gold: '🪙', wood: '🪵', stone: '🪨', food: '🌾' };

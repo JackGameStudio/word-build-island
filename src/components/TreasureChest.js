@@ -6,6 +6,8 @@
  *       chest.show(sessionRewards, vocabArray);
  */
 
+import { play as playSound } from '../core/sound.js';
+
 import { CHEST_TIERS, CHEST_UPGRADE_CHANCE, getRank, AppState } from '../data/constants.js';
 import { formatIncome } from '../core/economy.js';
 import { transition } from '../core/state.js';
@@ -125,6 +127,7 @@ export function createTreasureChest(onComplete) {
     });
 
     // 爆炸动画
+    playSound('chest_open');
     chestEl.textContent = '💥';
     chestEl.style.fontSize = '72px';
     doFlash();
@@ -146,6 +149,7 @@ export function createTreasureChest(onComplete) {
   function handleClick() {
     if (clickCount >= CLICKS_TO_OPEN) return;
     clickCount++;
+    playSound('button_click');
     renderDots();
 
     // 震动反馈

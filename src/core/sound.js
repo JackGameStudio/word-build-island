@@ -7,7 +7,7 @@
 let ctx = null;
 let masterGain = null;
 let muted = false;
-let masterVolume = 0.5;
+let masterVolume = 0.8;
 
 function ensureCtx() {
   if (!ctx) {
@@ -104,8 +104,8 @@ const SOUNDS = {
 
   build_place() {
     // 锤子敲击感：噪声 + 低音
-    playNoise(0.06, 0.06);
-    playTone(200, 0.12, 'triangle', 0.12);
+    playNoise(0.1, 0.4);
+    playTone(200, 0.18, 'triangle', 0.45);
   },
 
   build_demolish() {
@@ -161,11 +161,11 @@ const SOUNDS = {
   star_earned() {
     // 星星：闪亮上行
     playSequence([
-      [659, 0, 0.08, 'sine', 0.12],
-      [784, 0.06, 0.08, 'sine', 0.12],
-      [1047, 0.12, 0.12, 'sine', 0.15],
-      [1319, 0.18, 0.2, 'triangle', 0.12]
-    ], 0.16);
+      [659, 0, 0.08, 'sine', 0.25],
+      [784, 0.06, 0.08, 'sine', 0.25],
+      [1047, 0.12, 0.12, 'sine', 0.3],
+      [1319, 0.18, 0.25, 'triangle', 0.25]
+    ], 0.2);
   },
 
   daily_refresh() {
@@ -188,9 +188,9 @@ const SOUNDS = {
   },
 
   tick_income() {
-    // 被动收入：金币叮当
-    playTone(1319, 0.06, 'sine', 0.06);
-    setTimeout(() => playTone(1568, 0.06, 'sine', 0.05), 60);
+    // 被动收入：金币叮当（低调）
+    playTone(1319, 0.04, 'sine', 0.03);
+    setTimeout(() => playTone(1568, 0.04, 'sine', 0.025), 50);
   },
 
   bg_music: null // 背景音乐暂不实现（需循环，Web Audio 需额外处理）

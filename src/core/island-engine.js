@@ -12,6 +12,11 @@ const BLOCKED_TERRAIN = new Set([TERRAIN.WATER, TERRAIN.STONE]);
 /** 码头只能造在水上 */
 const DOCK_ONLY_TERRAIN = new Set([TERRAIN.WATER]);
 
+/** 缩放范围 */
+const SCALE_MIN = 0.5;
+const SCALE_MAX = 2.0;
+const ZOOM_STEP = 1.08; // 每级滚轮缩放系数
+
 export function createIslandEngine(container, assets, pickupSystem = null, customAssets = null) {
   const G = ISLAND_GRID_SIZE;
   const S = CELL_SIZE;
@@ -28,9 +33,13 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
   let terrainMap = structuredClone(DEFAULT_ISLAND_TERRAIN);
   let offsetX = 0;
   let offsetY = 0;
+  let scale = 1.0;
 
   // 幽灵预览
   let ghost = null; // { spriteIndex, gx, gy, valid }
+
+  // 移动建筑模式
+  let moveState = null; // { building, buildingIndex }
 
   // 拖拽状态
   let isDragging = false;
@@ -45,6 +54,7 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save();
     ctx.translate(offsetX, offsetY);
+    ctx.scale(scale, scale);
 
     // 地形层
     const hasTerrain = !!assets.terrain;
@@ -78,6 +88,7 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
       return a.y - b.y;
     });
     sorted.forEach(b => {
+      if (moveState && b === moveState.building) return; // 移动中跳过原建筑
       if (b.id === 'tree' && assets.treeSheet) {
         const variant = b.treeVariant ?? 0;
         ctx.drawImage(assets.treeSheet,
@@ -139,10 +150,14 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
     ctx.restore();
   }
 
-  // ─── Pointer events（移动端双指平移，桌面端单指平移）───
+  // ─── Pointer events（移动端双指平移+缩放，桌面端单指平移）───
   const pointers = new Map(); // pointerId → { startX, startY }
   let pinchStartDist = 0;
   let pinchStartScale = 1;
+  let pinchStartOffsetX = 0;
+  let pinchStartOffsetY = 0;
+  let pinchStartMid = null; // { x, y } — 双指起始中点
+  let pinchThresholdExceeded = false; // 已越过拖拽死区
 
   function getMidpoint(p1, p2) {
     return { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
@@ -161,6 +176,7 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
   const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 1;
 
   canvas.addEventListener('pointerdown', (e) => {
+    if (moveState) return; // 移动模式中不处理拖拽
     const pos = getPos(e);
     pointers.set(e.pointerId, pos);
 
@@ -172,24 +188,29 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
       dragOffsetY = offsetY;
       isDragging = !isTouchDevice; // 桌面端才支持单指拖拽
       wasPanning = false;
+      pinchThresholdExceeded = false;
     } else if (pointers.size === 2) {
-      // 双指：进入平移模式
+      // 双指：进入平移+缩放模式
       isDragging = true;
       wasPanning = false;
+      pinchThresholdExceeded = false;
       const entries = [...pointers.values()];
-      const mid = getMidpoint(entries[0], entries[1]);
-      dragStartX = mid.x;
-      dragStartY = mid.y;
+      pinchStartMid = getMidpoint(entries[0], entries[1]);
+      dragStartX = pinchStartMid.x;
+      dragStartY = pinchStartMid.y;
       dragOffsetX = offsetX;
       dragOffsetY = offsetY;
       pinchStartDist = getPinchDist(entries[0], entries[1]);
-      pinchStartScale = 1;
+      pinchStartScale = scale;
+      pinchStartOffsetX = offsetX;
+      pinchStartOffsetY = offsetY;
     }
     canvas.setPointerCapture(e.pointerId);
   });
 
   canvas.addEventListener('pointermove', (e) => {
     if (!pointers.has(e.pointerId)) return;
+    if (moveState) return; // 移动模式中不处理拖拽
     pointers.set(e.pointerId, getPos(e));
 
     if (!isDragging) return;
@@ -204,17 +225,36 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
         offsetX = dragOffsetX + dx;
         offsetY = dragOffsetY + dy;
       }
-    } else if (pointers.size >= 2) {
-      // 双指平移
+    } else if (pointers.size >= 2 && pinchStartMid) {
+      // 双指平移 + 缩放
       const entries = [...pointers.values()];
       const mid = getMidpoint(entries[0], entries[1]);
       const dx = mid.x - dragStartX;
       const dy = mid.y - dragStartY;
-      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) wasPanning = true;
-      if (wasPanning) {
-        offsetX = dragOffsetX + dx;
-        offsetY = dragOffsetY + dy;
+
+      // 死区判断
+      if (!pinchThresholdExceeded) {
+        const currentDist = getPinchDist(entries[0], entries[1]);
+        const distRatio = Math.abs(currentDist - pinchStartDist) / pinchStartDist;
+        if (Math.abs(dx) < 3 && Math.abs(dy) < 3 && distRatio < 0.02) return;
+        pinchThresholdExceeded = true;
       }
+
+      // 缩放：基于双指距离变化
+      const currentDist = getPinchDist(entries[0], entries[1]);
+      const zoomFactor = currentDist / pinchStartDist;
+      const newScale = Math.max(SCALE_MIN, Math.min(SCALE_MAX, pinchStartScale * zoomFactor));
+
+      // 以 pinch 起始中点为缩放原点做补偿
+      const zoomedOffsetX = pinchStartMid.x - (pinchStartMid.x - pinchStartOffsetX) * newScale / pinchStartScale;
+      const zoomedOffsetY = pinchStartMid.y - (pinchStartMid.y - pinchStartOffsetY) * newScale / pinchStartScale;
+
+      // 叠加平移量
+      offsetX = zoomedOffsetX + (mid.x - pinchStartMid.x);
+      offsetY = zoomedOffsetY + (mid.y - pinchStartMid.y);
+      scale = newScale;
+
+      wasPanning = true;
     }
     render();
   });
@@ -231,8 +271,28 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
     pointers.delete(e.pointerId);
     if (pointers.size < 2) {
       isDragging = pointers.size === 1 && !isTouchDevice;
+      pinchStartMid = null;
     }
   });
+
+  // ─── 滚轮缩放 ───
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+
+    const pos = getPos(e);
+    const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+    const oldScale = scale;
+    const newScale = Math.max(SCALE_MIN, Math.min(SCALE_MAX, scale * factor));
+
+    if (newScale === oldScale) return;
+
+    // 以鼠标位置为缩放原点做平移补偿
+    offsetX = pos.x - (pos.x - offsetX) * newScale / oldScale;
+    offsetY = pos.y - (pos.y - offsetY) * newScale / oldScale;
+    scale = newScale;
+
+    render();
+  }, { passive: false });
 
     // ─── API ───
   const island = {
@@ -270,7 +330,7 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
       ghost = {
         id: building?.id,
         spriteIndex: building?.spriteIndex,
-        treeVariant: building?._ghostVariant,
+        treeVariant: building?._ghostVariant ?? building?.treeVariant,
         gx, gy, valid
       };
       render();
@@ -280,31 +340,67 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
 
     screenToGrid(sx, sy) {
       return {
-        x: Math.floor((sx - offsetX) / S),
-        y: Math.floor((sy - offsetY) / S)
+        x: Math.floor((sx - offsetX) / (S * scale)),
+        y: Math.floor((sy - offsetY) / (S * scale))
       };
     },
 
     gridToScreen(gx, gy) {
-      return { x: gx * S + offsetX, y: gy * S + offsetY };
+      return { x: gx * S * scale + offsetX, y: gy * S * scale + offsetY };
     },
 
     isInBounds(gx, gy) {
       return gx >= 0 && gx < G && gy >= 0 && gy < G;
     },
 
-    isOccupied(gx, gy) {
-      return buildings.some(b => b.x === gx && b.y === gy);
+    isOccupied(gx, gy, excludeIndex = -1) {
+      return buildings.some((b, i) => i !== excludeIndex && b.x === gx && b.y === gy);
     },
 
     /** 拾取物命中测试 */
     hitTestPickup(sx, sy) {
       if (!pickupSystem) return null;
-      return pickupSystem.hitTest(sx, sy, offsetX, offsetY, S);
+      return pickupSystem.hitTest(sx, sy, offsetX, offsetY, S, scale);
     },
 
     getOffset() { return { x: offsetX, y: offsetY }; },
-    getPickupSystem() { return pickupSystem; }
+    getScale() { return scale; },
+    getPickupSystem() { return pickupSystem; },
+
+    /** 查找指定格子上的建筑索引（-1 表示无） */
+    findBuildingAt(gx, gy) {
+      return buildings.findIndex(b => b.x === gx && b.y === gy);
+    },
+    /** 开始移动建筑 */
+    startMoveBuilding(index) {
+      if (index < 0 || index >= buildings.length) return false;
+      moveState = { building: buildings[index], buildingIndex: index };
+      return true;
+    },
+    /** 结束移动：新位置有效则放置，否则回原位 */
+    endMoveBuilding(gx, gy) {
+      if (!moveState) return false;
+      const b = moveState.building;
+      const idx = moveState.buildingIndex;
+      const inBounds = isInBounds(gx, gy);
+      const occupied = buildings.some((bld, i) => i !== idx && bld.x === gx && bld.y === gy);
+      const buildable = isBuildableFor(b.id, gx, gy);
+      const valid = inBounds && !occupied && buildable;
+      if (valid) { b.x = gx; b.y = gy; }
+      moveState = null;
+      ghost = null;
+      render();
+      return valid;
+    },
+    /** 取消移动 */
+    cancelMoveBuilding() {
+      moveState = null;
+      ghost = null;
+      render();
+    },
+    isMoving() { return moveState !== null; },
+    getMoveBuilding() { return moveState?.building ?? null; },
+    getMoveBuildingIndex() { return moveState?.buildingIndex ?? -1; }
   };
 
   return island;
