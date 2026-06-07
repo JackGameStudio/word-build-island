@@ -35,6 +35,9 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
   let offsetY = 0;
   let scale = 1.0;
 
+  // NPC 引擎引用
+  let npcEngine = null;
+
   // 幽灵预览
   let ghost = null; // { spriteIndex, gx, gy, valid }
 
@@ -80,35 +83,52 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
       }
     }
 
-    // 建筑 sprite（按 layer + y 排序，layer 越小越靠后，同层按 y 从远到近）
-    const sorted = [...buildings].sort((a, b) => {
-      const la = a.layer ?? 1;
-      const lb = b.layer ?? 1;
-      if (la !== lb) return la - lb;
-      return a.y - b.y;
-    });
-    sorted.forEach(b => {
-      if (moveState && b === moveState.building) return; // 移动中跳过原建筑
-      if (b.id === 'tree' && assets.treeSheet) {
-        const variant = b.treeVariant ?? 0;
-        ctx.drawImage(assets.treeSheet,
-          variant * 64, 0, 64, 64,
-          b.x * S, b.y * S - 16, S, S
-        );
-      } else if (b.spriteIndex !== undefined && assets.spritesheet) {
-        drawSprite(ctx, assets.spritesheet,
-          b.spriteIndex, SPRITE.CELL_W, SPRITE.CELL_H,
-          b.x * S, b.y * S, S, S
-        );
-      } else {
-        ctx.fillStyle = '#8B4513';
-        ctx.fillRect(b.x * S + 4, b.y * S + 4, S - 8, S - 8);
-        ctx.font = `${S * 0.5}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(b.icon || '🏠', b.x * S + S / 2, b.y * S + S / 2);
+    // 建筑 + NPC 按底部 Y 混排绘制（Painter's Algorithm）
+    const drawables = [];
+
+    // 建筑 drawable
+    for (const b of buildings) {
+      if (moveState && b === moveState.building) continue;
+      drawables.push({ sortKey: (b.y + 1) * CELL_SIZE, b });
+    }
+
+    // NPC drawable
+    if (npcEngine) {
+      const npcs = npcEngine.getNPCs();
+      for (const n of npcs) {
+        drawables.push({ sortKey: n.py, npc: n });
       }
-    });
+    }
+
+    drawables.sort((a, b) => a.sortKey - b.sortKey);
+
+    const npcNow = performance.now();
+    for (const d of drawables) {
+      if (d.b) {
+        const b = d.b;
+        if (b.id === 'tree' && assets.treeSheet) {
+          const variant = b.treeVariant ?? 0;
+          ctx.drawImage(assets.treeSheet,
+            variant * 64, 0, 64, 64,
+            b.x * CELL_SIZE, b.y * CELL_SIZE - 16, CELL_SIZE, CELL_SIZE
+          );
+        } else if (b.spriteIndex !== undefined && assets.spritesheet) {
+          drawSprite(ctx, assets.spritesheet,
+            b.spriteIndex, SPRITE.CELL_W, SPRITE.CELL_H,
+            b.x * CELL_SIZE, b.y * CELL_SIZE, CELL_SIZE, CELL_SIZE
+          );
+        } else {
+          ctx.fillStyle = '#8B4513';
+          ctx.fillRect(b.x * CELL_SIZE + 4, b.y * CELL_SIZE + 4, CELL_SIZE - 8, CELL_SIZE - 8);
+          ctx.font = `${CELL_SIZE * 0.5}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(b.icon || '🏠', b.x * CELL_SIZE + CELL_SIZE / 2, b.y * CELL_SIZE + CELL_SIZE / 2);
+        }
+      } else if (d.npc) {
+        npcEngine.renderNPC(ctx, d.npc, assets, npcNow);
+      }
+    }
 
     // 幽灵预览
     if (ghost) {
@@ -371,6 +391,15 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
     findBuildingAt(gx, gy) {
       return buildings.findIndex(b => b.x === gx && b.y === gy);
     },
+
+    /** 设置 NPC 引擎引用 */
+    setNPCEngine(ref) { npcEngine = ref; },
+
+    /** 查找指定格子上的 NPC 索引（-1 表示无） */
+    findNPCAt(gx, gy) {
+      return npcEngine ? npcEngine.findNPCAt(gx, gy) : -1;
+    },
+
     /** 开始移动建筑 */
     startMoveBuilding(index) {
       if (index < 0 || index >= buildings.length) return false;

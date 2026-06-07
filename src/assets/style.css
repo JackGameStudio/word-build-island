@@ -81,23 +81,48 @@ html, body {
   border-image-source: url('/src/assets/images/btn-read-9slice.png') !important;
 }
 
-/* ─── 资源栏 ─── */
+/* ─── 复古像素资源栏 ─── */
 .resource-bar {
-  height: var(--header-height);
-  display: flex; align-items: center;
-  gap: 16px; padding: 0 16px;
-  background: var(--color-surface);
-  border-bottom: 2px solid #444;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: linear-gradient(180deg, #5a3a1a 0%, #3a2210 100%);
+  border-bottom: 3px solid #2a1808;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
   flex-shrink: 0;
   z-index: 10;
 }
+
 .resource-item {
-  display: flex; align-items: center; gap: 4px;
-  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  background: linear-gradient(180deg, #5e3c1e 0%, #3e220b 100%);
+  border: 2px solid;
+  border-color: #3a2008 #8b6914 #8b6914 #3a2008;
+  border-radius: 4px;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.6), inset 0 0 1px rgba(0,0,0,0.3);
+  min-width: 56px;
 }
-.resource-icon {
-  width: 24px; height: 24px;
-  display: inline-block;
+
+.resource-item .icon {
+  width: 24px;
+  height: 24px;
+  image-rendering: pixelated;
+}
+
+.resource-item .value {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
+  line-height: 1;
+  min-width: 24px;
+  text-align: right;
 }
 
 /* ─── 岛屿 Canvas 容器 ─── */
@@ -237,4 +262,116 @@ html, body {
   border: 2px solid #555;
   font-size: 12px;
   animation: toast-in 2s ease forwards;
+}
+
+/* ─── 打卡面板 ─── */
+.streak-count {
+  font-size: 56px;
+  font-weight: 700;
+  color: #FF6B35;
+  line-height: 1.1;
+  text-shadow: 0 2px 0 #cc4400, 0 0 12px rgba(255, 107, 53, 0.3);
+}
+
+.streak-milestone-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.streak-milestone-card {
+  padding: 8px 6px;
+  border: 2px solid #444;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  transition: border-color 200ms, background 200ms;
+}
+
+.streak-milestone--claimed {
+  border-color: #4ade80;
+  background: rgba(74, 222, 128, 0.1);
+}
+
+.streak-milestone--claimable {
+  border-color: #ffd700;
+  background: rgba(255, 215, 0, 0.08);
+  animation: streak-pulse 1.5s ease-in-out infinite;
+}
+
+.streak-milestone--locked {
+  opacity: 0.45;
+}
+
+.streak-milestone-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.streak-milestone-day {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.streak-milestone-reward {
+  font-size: 10px;
+  color: var(--color-muted);
+  text-align: center;
+  line-height: 1.3;
+}
+
+.streak-milestone-progress-outer {
+  width: 100%;
+  height: 4px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid #555;
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.streak-milestone-progress-inner {
+  height: 100%;
+  background: #888;
+  transition: width 300ms ease;
+}
+
+.streak-claim-btn {
+  font-size: 10px;
+  padding: 2px 8px;
+  min-width: auto;
+  margin-top: 4px;
+}
+
+.streak-encouragement {
+  text-align: center;
+  font-size: 11px;
+  color: var(--color-muted);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+@keyframes streak-pulse {
+  0%, 100% { border-color: #ffd700; }
+  50% { border-color: #ffaa00; }
+}
+
+@keyframes streakClaimPop {
+  0% { transform: scale(1); box-shadow: 0 0 0 rgba(251,191,36,0); }
+  50% { transform: scale(1.12); box-shadow: 0 0 16px rgba(251,191,36,0.6); }
+  100% { transform: scale(1); box-shadow: 0 0 0 rgba(251,191,36,0); }
+}
+
+.streak-milestone--just-claimed {
+  animation: streakClaimPop 0.4s ease-out;
+}
+
+@keyframes dailyTaskClaimPop {
+  0% { transform: scale(1); box-shadow: 0 0 0 rgba(255,215,0,0); }
+  50% { transform: scale(1.08); box-shadow: 0 0 14px rgba(255,215,0,0.5); }
+  100% { transform: scale(1); box-shadow: 0 0 0 rgba(255,215,0,0); }
+}
+.daily-task--just-claimed {
+  animation: dailyTaskClaimPop 0.4s ease-out;
 }

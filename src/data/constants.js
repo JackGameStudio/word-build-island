@@ -55,6 +55,15 @@ export const SPRITE = {
   ICON_H: 24
 };
 
+// icons.png 横向排列的列索引
+export const ICON_COLS = {
+  star:  0,
+  gold:  1,
+  wood:  2,
+  stone: 3,
+  wheat: 4
+};
+
 // 地形类型（对应 terrain.png 每一行）
 export const TERRAIN = {
   GRASS:  0,   // 草地（岛屿主体）

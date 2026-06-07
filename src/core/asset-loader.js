@@ -12,7 +12,9 @@ const ASSET_LIST = {
   btnHover:    '/src/assets/images/btn-hover.png',
   btnDisabled: '/src/assets/images/btn-disabled.png',
   rock:        '/src/assets/images/rock.png',
-  treeSheet:   '/src/assets/images/Tree_spritesheet.png'
+  treeSheet:   '/src/assets/images/Tree_spritesheet.png',
+  villagerSheet: '/src/assets/images/villager.png',
+  chestbox:    '/src/assets/images/chestbox.png'
 };
 
 /**

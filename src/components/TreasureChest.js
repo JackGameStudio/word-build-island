@@ -1,6 +1,6 @@
 /**
  * TreasureChest.js
- * 宝箱组件 — 4 次点击开箱，纯 CSS 动画 + emoji，每次点击赌升级
+ * 宝箱组件 — 4 次点击开箱，canvas 像素图 + 赌升级
  * 用法：const chest = createTreasureChest(assets, onComplete);
  *       app.appendChild(chest.element);
  *       chest.show(sessionRewards, vocabArray);
@@ -13,13 +13,15 @@ import { formatIncome } from '../core/economy.js';
 import { transition } from '../core/state.js';
 
 const CLICKS_TO_OPEN = 4;
+const CELL_SIZE = 150;
 
-export function createTreasureChest(onComplete) {
-  let currentTier = 0;   // 当前宝箱等级 0=木, 1=银...
+export function createTreasureChest(assets, onComplete) {
+  let currentTier = 0;   // 当前宝箱等级 0=木, 1=铁...
   let clickCount = 0;
   let sessionRewards = {};
   let vocabArray = [];
   let toastRef = null;
+  let isOpened = false;
 
   // ─── DOM ───
   const overlay = document.createElement('div');
@@ -33,13 +35,16 @@ export function createTreasureChest(onComplete) {
   const title = document.createElement('div');
   title.style.cssText = 'font-size:15px;font-weight:700;text-align:center;margin-bottom:2px;';
 
-  // 宝箱图标（emoji，随等级变化）
-  const chestEl = document.createElement('div');
-  chestEl.style.cssText = `
-    font-size:64px;text-align:center;
+  // 宝箱画布（canvas 150×150，CSS 缩放到合适大小）
+  const chestCanvas = document.createElement('canvas');
+  chestCanvas.width = CELL_SIZE;
+  chestCanvas.height = CELL_SIZE;
+  chestCanvas.style.cssText = `
+    display:block;margin:0 auto;
+    width:100px;height:100px;
+    image-rendering:pixelated;
     cursor:pointer;user-select:none;
     transition: transform 0.1s ease;
-    line-height:1;
     -webkit-tap-highlight-color:transparent;
   `;
 
@@ -64,10 +69,28 @@ export function createTreasureChest(onComplete) {
   `;
 
   // 恢复原始 DOM 顺序：标题 → 宝箱 → 提示 → 进度 → 奖励预览
-  panel.append(title, chestEl, hint, dots, rewardPreview, flash);
+  panel.append(title, chestCanvas, hint, dots, rewardPreview, flash);
   panel.style.position = 'relative';
   panel.style.padding = '12px 16px 16px';
   overlay.appendChild(panel);
+
+  // ─── Canvas 绘制 ───
+  function drawChest(open) {
+    const ctx = chestCanvas.getContext('2d');
+    const img = assets.chestbox;
+    if (!img) return;
+
+    const row = Math.min(currentTier, 3); // spritesheet 只有 4 行，tier 4 复用第 4 行
+    const col = open ? 1 : 0;
+
+    ctx.clearRect(0, 0, CELL_SIZE, CELL_SIZE);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(
+      img,
+      col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE,
+      0, 0, CELL_SIZE, CELL_SIZE
+    );
+  }
 
   function renderDots() {
     dots.innerHTML = '';
@@ -83,8 +106,8 @@ export function createTreasureChest(onComplete) {
 
   function updateChestVisual() {
     const tier = CHEST_TIERS[currentTier];
-    chestEl.textContent = tier.icon;
-    chestEl.style.filter = `drop-shadow(0 0 ${8 + currentTier * 4}px ${tier.glow})`;
+    drawChest(false);
+    chestCanvas.style.filter = `drop-shadow(0 0 ${8 + currentTier * 4}px ${tier.glow})`;
     title.textContent = `${tier.name} — 点击开锁！`;
     title.style.color = tier.color;
     rewardPreview.textContent = getPreviewText();
@@ -102,8 +125,8 @@ export function createTreasureChest(onComplete) {
   }
 
   function doShake() {
-    chestEl.classList.add('chest-shake');
-    setTimeout(() => chestEl.classList.remove('chest-shake'), 400);
+    chestCanvas.classList.add('chest-shake');
+    setTimeout(() => chestCanvas.classList.remove('chest-shake'), 400);
   }
 
   function doFlash() {
@@ -113,6 +136,7 @@ export function createTreasureChest(onComplete) {
 
   function doUpgrade() {
     currentTier = Math.min(currentTier + 1, CHEST_TIERS.length - 1);
+    playSound('chest_upgrade');
     doFlash();
     updateChestVisual();
     if (toastRef) toastRef.show(`⬆️ 升级为 ${CHEST_TIERS[currentTier].name}！`);
@@ -126,10 +150,10 @@ export function createTreasureChest(onComplete) {
       finalReward[k] = Math.floor(v * tier.multi);
     });
 
-    // 爆炸动画
+    // 绘制打开状态
     playSound('chest_open');
-    chestEl.textContent = '💥';
-    chestEl.style.fontSize = '72px';
+    isOpened = true;
+    drawChest(true);
     doFlash();
 
     // 资源飞出
@@ -154,8 +178,8 @@ export function createTreasureChest(onComplete) {
 
     // 震动反馈
     doShake();
-    chestEl.style.transform = 'scale(0.9)';
-    setTimeout(() => chestEl.style.transform = '', 100);
+    chestCanvas.style.transform = 'scale(0.9)';
+    setTimeout(() => chestCanvas.style.transform = '', 100);
 
     if (clickCount >= CLICKS_TO_OPEN) {
       // 开箱！
@@ -174,13 +198,14 @@ export function createTreasureChest(onComplete) {
     }
   }
 
-  chestEl.addEventListener('click', handleClick);
+  chestCanvas.addEventListener('click', handleClick);
 
   function show(rewards, vocab) {
     sessionRewards = { ...rewards };
     vocabArray = vocab || [];
     currentTier = 0;
     clickCount = 0;
+    isOpened = false;
 
     transition(AppState.CHEST);
 
@@ -192,8 +217,6 @@ export function createTreasureChest(onComplete) {
     renderDots();
     hint.textContent = `点击第 1/${CLICKS_TO_OPEN} 次开锁...`;
     rewardPreview.textContent = getPreviewText();
-    chestEl.textContent = CHEST_TIERS[0].icon;
-    chestEl.style.fontSize = '64px';
   }
 
   function hide() {
