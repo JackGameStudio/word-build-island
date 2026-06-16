@@ -8,7 +8,7 @@ import { canAfford } from '../core/economy.js';
 import { getState, transition } from '../core/state.js';
 import { AppState } from '../data/constants.js';
 
-export function createBuildDrawer(assets, getResources, getStars, vocab, islandLevel, island, onBuild) {
+export function createBuildDrawer(assets, getResources, getStars, vocab, islandLevel, island, getBuildings, onBuild) {
   let localLevel = islandLevel;
   let totalWords = countLearnedWords(vocab);
 
@@ -63,7 +63,7 @@ export function createBuildDrawer(assets, getResources, getStars, vocab, islandL
       btn.textContent = '建造';
       btn.style.cssText = 'font-size:11px;padding:4px 10px;min-width:auto;';
 
-      const check = canBuild(building, getResources(), localLevel, totalWords, stars);
+      const check = canBuild(building, getResources(), localLevel, totalWords, stars, getBuildings());
       if (!check.ok) {
         btn.classList.add('disabled');
         // 资源不足 → 显示缺什么；等级/词不足 → 显示 🔒

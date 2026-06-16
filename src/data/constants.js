@@ -38,10 +38,10 @@ export function getRank(box) { return RANK[box] || RANK[1]; }
 // ─── 宝箱系统 ───
 export const CHEST_TIERS = [
   { tier: 0, name: '木宝箱',   icon: '📦', color: '#8B4513', glow: '#a0522d', multi: 1.0 },
-  { tier: 1, name: '银宝箱',   icon: '🎁', color: '#c0c0c0', glow: '#e8e8e8', multi: 1.3 },
-  { tier: 2, name: '金宝箱',   icon: '🎁', color: '#ffd700', glow: '#fff44f', multi: 1.6 },
-  { tier: 3, name: '铂金宝箱', icon: '🎁', color: '#a0d2db', glow: '#d4f1f9', multi: 2.0 },
-  { tier: 4, name: '钻石宝箱', icon: '🎁', color: '#b9f2ff', glow: '#e0ffff', multi: 2.5 }
+  { tier: 1, name: '铜宝箱',   icon: '🎁', color: '#B87333', glow: '#daa06d', multi: 1.3 },
+  { tier: 2, name: '银宝箱',   icon: '🎁', color: '#C0C0C0', glow: '#e8e8e8', multi: 1.6 },
+  { tier: 3, name: '金宝箱',   icon: '🎁', color: '#FFD700', glow: '#fff44f', multi: 2.0 },
+  { tier: 4, name: '传奇宝箱', icon: '🎁', color: '#E040FB', glow: '#ea80fc', multi: 2.5 }
 ];
 
 // 每次点击升级概率 [点1, 点2, 点3, 点4]

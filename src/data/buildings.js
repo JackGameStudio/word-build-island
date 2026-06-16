@@ -48,14 +48,14 @@ export const BUILDINGS = [
     spriteIndex: 2,
     layer: 1,
     cost: { gold: 50, wood: 30, stone: 10 },
-    income: { gold: 2 },
+    income: { gold: 1 },
     capacity: { gold: 200 },
     buff: { type: 'streakGold', value: 10, description: '连续3天打卡额外+10金币' },
     levelRequired: 1,
     wordRequired: 10,
     starRequired: 2,
     tier: 0,
-    description: '有人居住的屋子，连续打卡额外金币，容量: 🪙200'
+    description: '有人居住的屋子，连续打卡额外金币，限 1+2×农田，容量: 🪙200'
   },
 
   // ── T1 ──
@@ -72,7 +72,7 @@ export const BUILDINGS = [
     wordRequired: 25,
     starRequired: 5,
     tier: 1,
-    description: '高级词复习额外产出金币'
+    description: '高级词复习额外产出金币，每座解锁 2 间小屋'
   },
   {
     id: 'quarry',
@@ -212,7 +212,7 @@ export function getBuildingById(id) {
  * @param {number} [stars=0] - 当前拥有的星星数
  * @returns {{ok:boolean, reason?:string}}
  */
-export function canBuild(building, resources, islandLevel, totalWords, stars = 0) {
+export function canBuild(building, resources, islandLevel, totalWords, stars = 0, builtBuildings = []) {
   for (const [res, cost] of Object.entries(building.cost)) {
     if ((resources[res] || 0) < cost)
       return { ok: false, reason: `资源不足` };
@@ -223,6 +223,14 @@ export function canBuild(building, resources, islandLevel, totalWords, stars = 0
     return { ok: false, reason: `需要学${building.wordRequired}个词` };
   if ((stars || 0) < (building.starRequired || 0))
     return { ok: false, reason: `需要 ⭐${building.starRequired}` };
+  // 小屋上限: 第1间免费，之后每座农田解锁2间
+  if (building.id === 'cottage') {
+    const cottageCount = builtBuildings.filter(b => b.id === 'cottage').length;
+    const gardenCount = builtBuildings.filter(b => b.id === 'garden').length;
+    const max = 1 + gardenCount * 2;
+    if (cottageCount >= max)
+      return { ok: false, reason: `需要更多农田（当前上限: ${max} 间）` };
+  }
   return { ok: true };
 }
 

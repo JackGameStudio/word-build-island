@@ -286,15 +286,25 @@ export function createNpcEngine(stateRef) {
         const def = NPC_DEFS.find(d => d.id === s.id);
         if (!def) continue;
         // 兼容旧存档：gx/gy → 推算 px/py
-        const fallbackGx = s.gx != null ? s.gx : 0;
-        const fallbackGy = s.gy != null ? s.gy : 0;
+        let px = s.px != null ? s.px : ((s.gx != null ? s.gx : 0) * CELL_SIZE);
+        let py = s.py != null ? s.py : ((s.gy != null ? s.gy : 0) * CELL_SIZE);
+        // 如果存档位置在阻挡格上（旧存档 SAND 不在 BLOCKED 中），重新寻找出生点
+        const savedGx = Math.floor(px / CELL_SIZE);
+        const savedGy = Math.floor(py / CELL_SIZE);
+        const terrain = getTerrain();
+        const savedTerrain = (terrain[savedGy] && terrain[savedGy][savedGx]) ?? TERRAIN.WATER;
+        if (BLOCKED.has(savedTerrain)) {
+          const spawn = findRandomSpawn();
+          px = spawn.gx * CELL_SIZE;
+          py = spawn.gy * CELL_SIZE;
+        }
         npcs.push({
           id: s.id,
           name: def.name,
           type: def.type,
           questPool: [...def.questPool],
-          px: s.px != null ? s.px : (fallbackGx * CELL_SIZE),
-          py: s.py != null ? s.py : (fallbackGy * CELL_SIZE),
+          px,
+          py,
           speed: s.speed || NPC_SPEED,
           state: s.state || 'idle',
           direction: s.direction || 'down',
@@ -302,7 +312,6 @@ export function createNpcEngine(stateRef) {
           walkFrameTimer: s.walkFrameTimer || 0,
           wanderTimer: s.wanderTimer || 0,
           wanderInterval: s.wanderInterval || rand(2000, 4000),
-          consecutiveFails: s.consecutiveFails || 0,
           quest: s.quest || null,
           cooldownUntil: s.cooldownUntil || 0
         });
@@ -450,22 +459,45 @@ export function createNpcEngine(stateRef) {
             }
           }
 
-          // 发起自由漫游：随机选方向，进入持续行走
-          npc.direction = pick(DIRECTIONS);
+          // 发起自由漫游：只从可通行方向中选
+          const gx = npcGridX(npc);
+          const gy = npcGridY(npc);
+          const passable = DIRECTIONS.filter(d => {
+            const [dx, dy] = DIR_DELTA[d];
+            return isPassable(gx + dx, gy + dy, npc.id);
+          });
+          npc.direction = passable.length > 0 ? pick(passable) : pick(DIRECTIONS);
           npc.walkFrame = 0;
           npc.walkFrameTimer = 0;
+          npc.walkDuration = 0;
+          npc.walkMax = rand(3000, 6000);
           npc.state = 'wandering';
         }
       }
 
       else if (npc.state === 'wandering') {
+        // —— 连续走路时长限制：3-6s 后停下 ——
+        npc.walkDuration = (npc.walkDuration || 0) + deltaMs;
+        if (npc.walkDuration >= (npc.walkMax || 6000)) {
+          npc.state = 'idle';
+          npc.wanderTimer = 0;
+          npc.wanderInterval = rand(2000, 4000);
+          continue;
+        }
+
         // —— 方向切换计时器：每 2-4s 有 65% 概率换方向 ——
         npc.wanderTimer += deltaMs;
         if (npc.wanderTimer >= npc.wanderInterval) {
           npc.wanderTimer = 0;
           npc.wanderInterval = rand(2000, 4000);
           if (Math.random() < 0.65) {
-            npc.direction = pick(DIRECTIONS);
+            const gx = npcGridX(npc);
+            const gy = npcGridY(npc);
+            const passable = DIRECTIONS.filter(d => {
+              const [dx, dy] = DIR_DELTA[d];
+              return isPassable(gx + dx, gy + dy, npc.id);
+            });
+            npc.direction = passable.length > 0 ? pick(passable) : npc.direction;
             npc.walkFrame = 0;
           }
 
@@ -478,13 +510,26 @@ export function createNpcEngine(stateRef) {
           }
         }
 
-        // —— 边界情况：当前格子不可通行 → 强制换方向 ——
+        // —— 边界情况：当前格子不可通行 ——
         const curGx = npcGridX(npc);
         const curGy = npcGridY(npc);
-        if (!isPassable(curGx, curGy, npc.id)) {
-          npc.direction = pick(DIRECTIONS);
-          npc.consecutiveFails++;
-          continue;
+        const onBlocked = !isPassable(curGx, curGy, npc.id);
+
+        if (onBlocked) {
+          // 寻找可通行的相邻方向逃生
+          const escapeDir = DIRECTIONS.find(d => {
+            const [dx, dy] = DIR_DELTA[d];
+            return isPassable(curGx + dx, curGy + dy, npc.id);
+          });
+          if (escapeDir) {
+            npc.direction = escapeDir;
+            npc.walkFrame = 0;
+          } else {
+            npc.state = 'idle';
+            npc.wanderTimer = 0;
+            npc.wanderInterval = rand(2000, 4000);
+            continue;
+          }
         }
 
         // —— 计算下一步像素位置 ——
@@ -497,8 +542,8 @@ export function createNpcEngine(stateRef) {
         const nextGx = Math.floor(nextPx / CELL_SIZE);
         const nextGy = Math.floor(nextPy / CELL_SIZE);
 
-        if (isPassable(nextGx, nextGy, npc.id)) {
-          // 可通行：自由移动
+        if (onBlocked || isPassable(nextGx, nextGy, npc.id)) {
+          // 逃生中或可通行：自由移动
           npc.px = nextPx;
           npc.py = nextPy;
           npc.consecutiveFails = 0;
@@ -510,19 +555,10 @@ export function createNpcEngine(stateRef) {
             npc.walkFrameTimer -= WALK_FRAME_MS;
           }
         } else {
-          // 碰撞：换方向（避开当前方向）
-          npc.consecutiveFails++;
-          if (npc.consecutiveFails >= 3) {
-            // 卡住 3 次 → 暂停一轮
-            npc.state = 'idle';
-            npc.wanderTimer = 0;
-            npc.wanderInterval = rand(2000, 4000);
-            npc.consecutiveFails = 0;
-          } else {
-            const otherDirs = DIRECTIONS.filter(d => d !== npc.direction);
-            npc.direction = pick(otherDirs);
-            npc.walkFrame = 0;
-          }
+          // 碰撞：直接停下，等 idle 计时器重新选方向
+          npc.state = 'idle';
+          npc.wanderTimer = 0;
+          npc.wanderInterval = rand(2000, 4000);
         }
       }
 

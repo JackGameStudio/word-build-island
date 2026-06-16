@@ -163,18 +163,6 @@ html, body {
   transform: translateY(0);
 }
 
-/* ─── 宝箱面板：强制贴底 ─── */
-.chest-panel.slide-panel {
-  position: absolute !important;
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  max-height: 35vh !important;
-  margin: 0 auto !important;
-  border-bottom-left-radius: 0 !important;
-  border-bottom-right-radius: 0 !important;
-}
-
 /* ─── Roadmap 面板：强制贴底 ─── */
 .roadmap-panel.slide-panel {
   position: absolute !important;

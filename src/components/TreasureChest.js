@@ -13,7 +13,7 @@ import { formatIncome } from '../core/economy.js';
 import { transition } from '../core/state.js';
 
 const CLICKS_TO_OPEN = 4;
-const CELL_SIZE = 150;
+const CELL_SIZE = 200;
 
 export function createTreasureChest(assets, onComplete) {
   let currentTier = 0;   // 当前宝箱等级 0=木, 1=铁...
@@ -25,11 +25,20 @@ export function createTreasureChest(assets, onComplete) {
 
   // ─── DOM ───
   const overlay = document.createElement('div');
-  overlay.className = 'overlay-backdrop';
-  overlay.style.display = 'none';
+  overlay.style.cssText = 'display:none;position:fixed;inset:0;z-index:100;background:var(--color-overlay);cursor:default;';
 
   const panel = document.createElement('div');
-  panel.className = 'slide-panel panel-9slice chest-panel';
+  panel.className = 'panel-9slice';
+  panel.style.cssText = `
+    position:fixed; bottom:130px; left:50%; z-index:101;
+    transform:translateX(-50%);
+    display:none;
+    width:240px;
+    padding:12px 16px 16px;
+    filter:drop-shadow(0 4px 20px rgba(0,0,0,0.5));
+    transition:opacity 0.12s;
+    opacity:0;
+  `;
 
   // 标题
   const title = document.createElement('div');
@@ -41,7 +50,7 @@ export function createTreasureChest(assets, onComplete) {
   chestCanvas.height = CELL_SIZE;
   chestCanvas.style.cssText = `
     display:block;margin:0 auto;
-    width:100px;height:100px;
+    width:200px;height:200px;
     image-rendering:pixelated;
     cursor:pointer;user-select:none;
     transition: transform 0.1s ease;
@@ -70,9 +79,8 @@ export function createTreasureChest(assets, onComplete) {
 
   // 恢复原始 DOM 顺序：标题 → 宝箱 → 提示 → 进度 → 奖励预览
   panel.append(title, chestCanvas, hint, dots, rewardPreview, flash);
-  panel.style.position = 'relative';
-  panel.style.padding = '12px 16px 16px';
   overlay.appendChild(panel);
+  document.body.appendChild(overlay);
 
   // ─── Canvas 绘制 ───
   function drawChest(open) {
@@ -80,7 +88,7 @@ export function createTreasureChest(assets, onComplete) {
     const img = assets.chestbox;
     if (!img) return;
 
-    const row = Math.min(currentTier, 3); // spritesheet 只有 4 行，tier 4 复用第 4 行
+    const row = Math.min(currentTier, 4); // spritesheet 5 行，tier 0-4
     const col = open ? 1 : 0;
 
     ctx.clearRect(0, 0, CELL_SIZE, CELL_SIZE);
@@ -210,8 +218,12 @@ export function createTreasureChest(assets, onComplete) {
     transition(AppState.CHEST);
 
     overlay.style.display = 'block';
-    overlay.classList.add('visible');
-    requestAnimationFrame(() => panel.classList.add('open'));
+    panel.style.display = 'block';
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        panel.style.opacity = '1';
+      });
+    });
 
     updateChestVisual();
     renderDots();
@@ -220,9 +232,11 @@ export function createTreasureChest(assets, onComplete) {
   }
 
   function hide() {
-    panel.classList.remove('open');
-    overlay.classList.remove('visible');
-    setTimeout(() => { overlay.style.display = 'none'; }, 300);
+    panel.style.opacity = '0';
+    setTimeout(() => {
+      panel.style.display = 'none';
+      overlay.style.display = 'none';
+    }, 200);
     transition(AppState.IDLE);
   }
 
