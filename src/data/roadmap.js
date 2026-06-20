@@ -97,14 +97,14 @@ export const BUILDING_ROADMAP = [
     }
   },
   {
-    id: 'lighthouse',
-    icon: '🗼',
-    name: '灯塔',
-    desc: '指引方向，离线收入大幅提升',
-    check: (state) => state.island.buildings.some(b => b.id === 'lighthouse'),
+    id: 'defense_tower',
+    icon: '🏹',
+    name: '防御塔',
+    desc: '自动攻击射程内海盗，保卫岛屿',
+    check: (state) => state.island.buildings.some(b => b.id === 'defense_tower'),
     reward: { star: 1 },
     progress: (state) => {
-      const cnt = state.island.buildings.filter(b => b.id === 'lighthouse').length;
+      const cnt = state.island.buildings.filter(b => b.id === 'defense_tower').length;
       return [cnt, 1];
     }
   },
@@ -121,14 +121,14 @@ export const BUILDING_ROADMAP = [
     }
   },
   {
-    id: 'factory',
-    icon: '🏭',
-    name: '工厂',
-    desc: '工业化！所有资源产出 ×2',
-    check: (state) => state.island.buildings.some(b => b.id === 'factory'),
+    id: 'barracks',
+    icon: '⚔️',
+    name: '兵营',
+    desc: '训练士兵抵御海盗入侵',
+    check: (state) => state.island.buildings.some(b => b.id === 'barracks'),
     reward: { star: 1, gold: 200 },
     progress: (state) => {
-      const cnt = state.island.buildings.filter(b => b.id === 'factory').length;
+      const cnt = state.island.buildings.filter(b => b.id === 'barracks').length;
       return [cnt, 1];
     }
   },

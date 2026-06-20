@@ -109,18 +109,20 @@ export const BUILDINGS = [
   },
   {
     id: 'deep_mine',
-    name: '深矿',
-    icon: '💎',
-    spriteIndex: null,
-    layer: 1,
+    name: '风车作坊',
+    icon: '🌾',
+    spriteKey: 'windmillBody',
+    spriteLevels: 1,
+    fansSprite: 'windmillFans',
+    fansPivot: { x: 47, y: 32 },
+    layer: 2,
     cost: { gold: 300, wood: 150, stone: 80 },
-    income: { stone: 3 },
-    buff: { type: 'box4Multiplier', value: 1.3, description: 'Box≥4 复习奖励×1.3' },
+    buff: { type: 'reviewGoldMultiplier', value: 1.3, description: '所有复习 gold ×1.3' },
     levelRequired: 3,
     wordRequired: 150,
     starRequired: 20,
     tier: 2,
-    description: '高级石材产出，Box≥4 复习奖励×1.3'
+    description: '所有复习 gold 收入 ×1.3'
   },
 
   // ── T3 ──
@@ -140,19 +142,30 @@ export const BUILDINGS = [
     description: '所有复习 gold 收入 ×1.5'
   },
   {
-    id: 'lighthouse',
-    name: '灯塔',
-    icon: '🗼',
+    id: 'defense_tower',
+    name: '防御塔',
+    icon: '🏹',
     spriteIndex: null,
+    spriteKey: 'wartower',
+    spriteLevels: 3,
     layer: 2,
-    cost: { gold: 600, wood: 300, stone: 150 },
-    income: { gold: 3 },
-    buff: { type: 'starMultiplier', value: 1.5, description: '⭐ 获取速度 ×1.5' },
+    cost: { gold: 600, wood: 400, stone: 100 },
+    income: null,
+    buff: null,
     levelRequired: 4,
-    wordRequired: 350,
-    starRequired: 40,
+    wordRequired: 280,
+    starRequired: 32,
     tier: 3,
-    description: '星星获取速度 ×1.5'
+    description: '自动攻击射程内海盗，可升级',
+    // 升级数据
+    upgradeable: true,
+    tierLevels: [
+      { level: 1, range: 3, arrowDMG: 18, arrowCost: { wood: 3 }, cannonDMG: 0, cannonCost: null, ammoCapacity: 20 },
+      { level: 2, range: 4, arrowDMG: 20, arrowCost: { wood: 2 }, cannonDMG: 35, cannonCost: { stone: 4 }, ammoCapacity: 40,
+        upgradeCost: { gold: 300, wood: 350, stone: 200 }, reqStars: 55, reqIslandLv: 5 },
+      { level: 3, range: 5, arrowDMG: 25, arrowCost: { wood: 2 }, cannonDMG: 45, cannonCost: { stone: 3 }, ammoCapacity: 60,
+        upgradeCost: { gold: 600, wood: 500, stone: 350 }, reqStars: 80, reqIslandLv: 5 }
+    ]
   },
   {
     id: 'town_square',
@@ -172,19 +185,29 @@ export const BUILDINGS = [
 
   // ── T4 ──
   {
-    id: 'factory',
-    name: '工厂',
-    icon: '🏭',
+    id: 'barracks',
+    name: '兵营',
+    icon: '⚔️',
     spriteIndex: null,
-    layer: 2,
-    cost: { gold: 1500, wood: 600, stone: 400 },
-    income: { gold: 10, wood: 5, stone: 3 },
-    buff: { type: 'dailyWordLimit', value: 5, description: '每日新词上限 +5' },
-    levelRequired: 5,
-    wordRequired: 700,
-    starRequired: 70,
+    spriteKey: 'barracks',
+    spriteLevels: 3,
+    layer: 1,
+    cost: { gold: 800, wood: 400, stone: 200 },
+    income: null,
+    buff: null,
+    levelRequired: 4,
+    wordRequired: 300,
+    starRequired: 35,
     tier: 4,
-    description: '每日新词上限 +5，全资源产出'
+    description: '训练士兵抵御海盗，可升级',
+    upgradeable: true,
+    tierLevels: [
+      { level: 1, trainSpeed: 60, capacity: 3, soldierATK: 20, soldierHP: 35, recruitGold: 40 },
+      { level: 2, trainSpeed: 40, capacity: 5, soldierATK: 22, soldierHP: 45, recruitGold: 60,
+        upgradeCost: { gold: 500, wood: 350, stone: 300 }, reqStars: 55, reqIslandLv: 5 },
+      { level: 3, trainSpeed: 25, capacity: 8, soldierATK: 30, soldierHP: 60, recruitGold: 80,
+        upgradeCost: { gold: 1000, wood: 600, stone: 500 }, reqStars: 80, reqIslandLv: 5 }
+    ]
   },
   {
     id: 'castle',
@@ -194,12 +217,12 @@ export const BUILDINGS = [
     layer: 2,
     cost: { gold: 3000, wood: 1200, stone: 800 },
     income: { gold: 20, wood: 8, stone: 5 },
-    buff: { type: 'globalBuff', value: 1.2, description: '全局 Buff 20%, ⭐×2' },
+    buff: { type: 'globalBuff', value: 1.2, description: '全局 Buff 20%, ⭐×3' },
     levelRequired: 5,
     wordRequired: 1000,
     starRequired: 100,
     tier: 4,
-    description: '终极建筑，全局奖励 +20%，⭐×2'
+    description: '终极建筑，全局奖励 +20%，⭐×3'
   }
 ];
 
@@ -239,4 +262,29 @@ export function canBuild(building, resources, islandLevel, totalWords, stars = 0
  */
 export function countLearnedWords(vocab) {
   return vocab.filter(w => w.learnedAt !== null).length;
+}
+
+/**
+ * 获取建筑当前等级升级所需资源
+ * @param {object} building - 建筑定义对象
+ * @param {number} currentLevel - 当前等级 (0-based, 0=未建造仅参照基础cost)
+ * @returns {object|null} 升级成本，若无更高等级返回null
+ */
+export function upgradeCost(building, currentLevel) {
+  if (!building.upgradeable || !building.tierLevels) return null;
+  if (currentLevel >= building.tierLevels.length) return null;
+  return building.tierLevels[currentLevel].upgradeCost || null;
+}
+
+/**
+ * 获取建筑在某等级的完整属性
+ * @param {object} building - 建筑定义对象
+ * @param {number} level - 等级 (1-based)
+ * @returns {object|null} 该等级的属性对象
+ */
+export function getUpgradeStats(building, level) {
+  if (!building.upgradeable || !building.tierLevels) return null;
+  const idx = level - 1;
+  if (idx < 0 || idx >= building.tierLevels.length) return null;
+  return building.tierLevels[idx];
 }

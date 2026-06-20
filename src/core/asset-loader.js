@@ -14,7 +14,20 @@ const ASSET_LIST = {
   rock:        '/src/assets/images/rock.png',
   treeSheet:   '/src/assets/images/Tree_spritesheet.png',
   villagerSheet: '/src/assets/images/villager.png',
-  chestbox:    '/src/assets/images/chestbox.png'
+  chestbox:    '/src/assets/images/chestbox.png',
+  // 海盗系统新资产
+  wartower:    '/src/assets/images/wartower.png',
+  barracks:    '/src/assets/images/barracks.png',
+  windmillBody: '/src/assets/images/Windmill_body.png',
+  windmillFans: '/src/assets/images/Windmill_Fans.png',
+  soldier:     '/src/assets/images/soldier.png',
+  pirate:      '/src/assets/images/pirate.png',
+  pirateship:  '/src/assets/images/pirateship.png',
+  // 防御塔射弹 & VFX
+  arrow:       '/src/assets/images/arrow.png',
+  hitVFX:      '/src/assets/images/HitVFX.png',
+  dustVFX:     '/src/assets/images/dustVFX.png',
+  FightVFX:    '/src/assets/images/FightVFX.png'
 };
 
 /**

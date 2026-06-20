@@ -3,7 +3,7 @@
  * 经济系统 — 资源管理、词汇→奖励映射、被动收入、离线结算、Buff 叠加
  */
 
-import { OFFLINE_RATE, OFFLINE_MAX_HOURS, ECONOMY_TICK } from '../data/constants.js';
+import { OFFLINE_RATE, OFFLINE_MAX_HOURS, ECONOMY_TICK, BUILDING_HP, REPAIR_COST, SOLDIER_MAINTENANCE, PIRATE_EVENT } from '../data/constants.js';
 import { getBuildingById } from '../data/buildings.js';
 
 /**
@@ -51,15 +51,10 @@ export function rewardForReview(word, quality, buffs = {}) {
     reward.gold = Math.floor(reward.gold * buffs.reviewGoldMultiplier);
   }
 
-  // Lighthouse: ⭐ 获取速度 ×1.5
-  if (buffs.starMultiplier && reward.star) {
-    reward.star = Math.floor(reward.star * buffs.starMultiplier);
-  }
-
-  // Castle: 全局学习 Buff+20%, ⭐×2
+  // Castle: 全局学习 Buff+20%, ⭐×3
   if (buffs.globalBuff) {
     Object.keys(reward).forEach(k => {
-      if (k === 'star') reward[k] = Math.floor((reward[k] || 0) * 2);
+      if (k === 'star') reward[k] = Math.floor((reward[k] || 0) * 3);
       else reward[k] = Math.floor((reward[k] || 0) * buffs.globalBuff);
     });
   }
@@ -166,15 +161,9 @@ export function calculateBuffs(buildings, stats) {
       case 'reviewGoldMultiplier':
         buffs.reviewGoldMultiplier = Math.max(buffs.reviewGoldMultiplier || 1, def.buff.value);
         break;
-      case 'starMultiplier':
-        buffs.starMultiplier = Math.max(buffs.starMultiplier || 1, def.buff.value);
-        break;
       case 'streak7Review':
         if ((stats.streak || 0) >= 7)
           buffs.extraReview = (buffs.extraReview || 0) + def.buff.value;
-        break;
-      case 'dailyWordLimit':
-        buffs.dailyWordBonus = (buffs.dailyWordBonus || 0) + def.buff.value;
         break;
       case 'globalBuff':
         buffs.globalBuff = Math.max(buffs.globalBuff || 1, def.buff.value);
@@ -266,4 +255,63 @@ export function capResources(resources, capacity) {
     }
   }
   return { capped, overflow };
+}
+
+// ─── 海盗防御经济 ───
+
+/**
+ * 计算部队维护费（gold/tick）
+ * @param {number} soldierCount - 当前士兵总数
+ * @returns {number} 每 tick gold 消耗
+ */
+export function calculateDefenseCost(soldierCount) {
+  return Math.ceil(soldierCount * SOLDIER_MAINTENANCE);
+}
+
+/**
+ * 计算建筑修复成本
+ * @param {object} building - 建筑定义对象
+ * @param {number} damage - 已损失 HP
+ * @returns {{gold:number, wood:number, stone:number}}
+ */
+export function calculateRepairCost(building, damage) {
+  const tier = building.tier || 0;
+  const hp = BUILDING_HP[tier] || 80;
+  const ratio = Math.max(damage / hp, 0);
+  return {
+    gold: Math.ceil(ratio * hp * REPAIR_COST.gold),
+    wood: Math.ceil(ratio * hp * REPAIR_COST.wood),
+    stone: Math.floor(ratio * hp * REPAIR_COST.stone)
+  };
+}
+
+/**
+ * 计算防御塔弹药补充成本
+ * @param {object} towerStats - 防御塔当前等级属性
+ * @param {number} missingArrows - 缺少的箭矢数
+ * @param {number} missingCannon - 缺少的炮弹数
+ * @returns {{gold:number, wood:number, stone:number}}
+ */
+export function calculateAmmoCost(towerStats, missingArrows = 0, missingCannon = 0) {
+  const cost = { gold: 0, wood: 0, stone: 0 };
+  if (missingArrows > 0 && towerStats.arrowCost) {
+    cost.wood += missingArrows * towerStats.arrowCost.wood;
+  }
+  if (missingCannon > 0 && towerStats.cannonCost) {
+    cost.stone += missingCannon * towerStats.cannonCost.stone;
+  }
+  return cost;
+}
+
+/**
+ * 计算海盗波次掉落奖励
+ * @param {Array} piratesDefeated - 击败的海盗类型列表
+ * @returns {{gold:number}}
+ */
+export function calculatePirateReward(piratesDefeated) {
+  let gold = 0;
+  for (const pirate of piratesDefeated) {
+    gold += (pirate.lootGold || 0) * PIRATE_EVENT.rewardMultiplier;
+  }
+  return { gold };
 }

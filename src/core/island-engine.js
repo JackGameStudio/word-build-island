@@ -6,6 +6,7 @@
 
 import { ISLAND_GRID_SIZE, CELL_SIZE, SPRITE, TERRAIN, DEFAULT_ISLAND_TERRAIN } from '../data/constants.js';
 import { drawSprite, drawTerrainTile } from './asset-loader.js';
+import { getBuildingById } from '../data/buildings.js';
 
 /** 不可建造的地形类型 */
 const BLOCKED_TERRAIN = new Set([TERRAIN.WATER, TERRAIN.STONE]);
@@ -44,6 +45,18 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
   // 移动建筑模式
   let moveState = null; // { building, buildingIndex }
 
+  // 战斗状态
+  let combatState = { pirates: [], soldiers: [], phase: 'idle' };
+
+  // 非战斗驻守士兵
+  let offDutySoldiers = [];
+
+  // 战斗单位 sprite 常量（3×3 spritesheet, 同 villager）
+  const COMBAT_FRAME_W = 32;
+  const COMBAT_FRAME_H = 32;
+  const COMBAT_COLS = 3;
+  const COMBAT_RENDER_H = 32; // 单位高度绘制在格子之上
+
   // 拖拽状态
   let isDragging = false;
   let dragStartX = 0;
@@ -53,6 +66,67 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
   let wasPanning = false;
 
   // ─── 渲染 ───
+
+  /**
+   * 绘制单个战斗单位（3×3 spritesheet, 同 villager 布局）
+   * Row 0: 下, Row 1: 左/右, Row 2: 上
+   */
+  function drawCombatUnit(ctx, sheet, unit, now) {
+    const px = unit.x * CELL_SIZE - COMBAT_FRAME_W / 2;
+    const py = unit.y * CELL_SIZE - COMBAT_RENDER_H;
+
+    // 动画帧（200ms/帧）
+    unit._lastFrameTime = unit._lastFrameTime || 0;
+    if (now - unit._lastFrameTime > 200) {
+      unit._walkFrame = ((unit._walkFrame || 0) + 1) % COMBAT_COLS;
+      unit._lastFrameTime = now;
+    }
+    const col = unit._walkFrame || 0;
+
+    // 方向决定行
+    const dir = unit._direction || 0; // 0=下, 1=左, 2=右, 3=上
+    let srcRow, flipX = false;
+    if (dir === 0) { srcRow = 0; }
+    else if (dir === 2) { srcRow = 1; flipX = true; }
+    else if (dir === 1) { srcRow = 1; }
+    else { srcRow = 2; }
+
+    ctx.save();
+    if (flipX) {
+      ctx.translate(px + COMBAT_FRAME_W / 2, py);
+      ctx.scale(-1, 1);
+      ctx.drawImage(sheet,
+        col * COMBAT_FRAME_W, srcRow * COMBAT_FRAME_H, COMBAT_FRAME_W, COMBAT_FRAME_H,
+        -COMBAT_FRAME_W / 2, 0, COMBAT_FRAME_W, COMBAT_RENDER_H);
+    } else {
+      ctx.drawImage(sheet,
+        col * COMBAT_FRAME_W, srcRow * COMBAT_FRAME_H, COMBAT_FRAME_W, COMBAT_FRAME_H,
+        px, py, COMBAT_FRAME_W, COMBAT_RENDER_H);
+    }
+    ctx.restore();
+
+    // 血条
+    const hpRatio = unit.hp / unit.maxHp;
+    const barX = px - 2;
+    const barY = py - 8;
+    ctx.fillStyle = '#333';
+    ctx.fillRect(barX, barY, COMBAT_FRAME_W + 4, 4);
+    ctx.fillStyle = hpRatio > 0.5 ? '#4ade80' : hpRatio > 0.25 ? '#facc15' : '#ef4444';
+    ctx.fillRect(barX, barY, (COMBAT_FRAME_W + 4) * hpRatio, 4);
+  }
+
+  /** 绘制静态海盗船（单张 image, 非 spritesheet） */
+  function drawShip(ctx, sheet, ship) {
+    const w = sheet.naturalWidth || 64;
+    const h = sheet.naturalHeight || 64;
+    const scale = CELL_SIZE / Math.max(w, h);
+    const dw = w * scale * 0.9;
+    const dh = h * scale * 0.9;
+    const px = ship.x * CELL_SIZE - dw / 2;
+    const py = ship.y * CELL_SIZE - dh / 2;
+    ctx.drawImage(sheet, px, py, dw, dh);
+  }
+
   function render() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save();
@@ -100,9 +174,40 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
       }
     }
 
+    // 战斗单位 drawable（海盗 + 士兵）
+    // fightVFX 活跃时隐藏对应 pair 的 sprite，淡出中显示幸存者
+    if (combatState.phase !== 'idle') {
+      // 船只（全阶段可见）
+      if (combatState.ships) {
+        for (const s of combatState.ships) {
+          drawables.push({ sortKey: s.y * CELL_SIZE, ship: s });
+        }
+      }
+      const csIds = combatState._combatSoldierIds || new Set();
+      const cpIds = combatState._combatPirateIds || new Set();
+      for (const p of combatState.pirates) {
+        if (p.alive && (combatState.phase !== 'combat' || !cpIds.has(p.id))) {
+          drawables.push({ sortKey: (p.y + 1) * CELL_SIZE, pirate: p });
+        }
+      }
+      for (const s of combatState.soldiers) {
+        if (s.hp > 0 && (combatState.phase !== 'combat' || !csIds.has(s.id))) {
+          drawables.push({ sortKey: (s.y + 1) * CELL_SIZE, soldier: s });
+        }
+      }
+    } else {
+      // 非战斗：驻守士兵在地图上走动
+      for (const s of offDutySoldiers) {
+        if (s.alive !== false) {
+          drawables.push({ sortKey: (s.y + 0.5) * CELL_SIZE, soldier: s });
+        }
+      }
+    }
+
     drawables.sort((a, b) => a.sortKey - b.sortKey);
 
     const npcNow = performance.now();
+    const combatNow = performance.now();
     for (const d of drawables) {
       if (d.b) {
         const b = d.b;
@@ -112,6 +217,31 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
             variant * 64, 0, 64, 64,
             b.x * CELL_SIZE, b.y * CELL_SIZE - 16, CELL_SIZE, CELL_SIZE
           );
+        } else if (b.spriteKey && assets[b.spriteKey]) {
+          const img = assets[b.spriteKey];
+          const levels = b.spriteLevels || 3;
+          const colW = img.naturalWidth / levels;
+          const srcX = ((b.level || 1) - 1) * colW;
+          const drawH = img.naturalHeight;
+          const extraH = drawH - CELL_SIZE;
+          ctx.drawImage(img,
+            srcX, 0, colW, drawH,
+            b.x * CELL_SIZE, b.y * CELL_SIZE - extraH, CELL_SIZE, drawH);
+          // 风车风扇旋转
+          if (b.fansSprite && assets[b.fansSprite]) {
+            const fansImg = assets[b.fansSprite];
+            const pivot = b.fansPivot || { x: 47, y: 32 };
+            const cx = b.x * CELL_SIZE + pivot.x;
+            const cy = b.y * CELL_SIZE - extraH + pivot.y;
+            const angle = (performance.now() / 5000) * Math.PI * 2;
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(angle);
+            const fw = fansImg.naturalWidth;
+            const fh = fansImg.naturalHeight;
+            ctx.drawImage(fansImg, -fw / 2, -fh / 2, fw, fh);
+            ctx.restore();
+          }
         } else if (b.spriteIndex !== undefined && assets.spritesheet) {
           drawSprite(ctx, assets.spritesheet,
             b.spriteIndex, SPRITE.CELL_W, SPRITE.CELL_H,
@@ -127,12 +257,172 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
         }
       } else if (d.npc) {
         npcEngine.renderNPC(ctx, d.npc, assets, npcNow);
+      } else if (d.pirate && assets.pirate) {
+        drawCombatUnit(ctx, assets.pirate, d.pirate, combatNow);
+      } else if (d.soldier && assets.soldier) {
+        drawCombatUnit(ctx, assets.soldier, d.soldier, combatNow);
+      } else if (d.ship && assets.pirateship) {
+        drawShip(ctx, assets.pirateship, d.ship);
+      }
+    }
+
+    // ─── 射弹 & VFX（在单位上方绘制）───
+    if (combatState.projectiles && assets.arrow) {
+      const renderNow = performance.now();
+      for (const pr of combatState.projectiles) {
+        const elapsed = renderNow - pr.startTime;
+        const t = Math.min(1, Math.max(0, elapsed / pr.duration));
+        const px = pr.startX + (pr.endX - pr.startX) * t;
+        const py = pr.startY + (pr.endY - pr.startY) * t;
+        const angle = Math.atan2(pr.endY - pr.startY, pr.endX - pr.startX);
+        const arrowW = 48, arrowH = 21;
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(angle);
+        ctx.drawImage(assets.arrow, -arrowW / 2, -arrowH / 2, arrowW, arrowH);
+        ctx.restore();
+      }
+    }
+    if (combatState.vfx) {
+      const renderNow = performance.now();
+      // 为 fightVFX 构建单位位置查找表（跟随移动单位）
+      let soldierMap, pirateMap;
+      if (combatState._hasFightVFX) {
+        soldierMap = {}; pirateMap = {};
+        for (const s of combatState.soldiers) { soldierMap[s.id] = s; }
+        for (const p of combatState.pirates) { pirateMap[p.id] = p; }
+      }
+      for (const v of combatState.vfx) {
+        const elapsed = renderNow - v.startTime;
+        const t = elapsed / v.duration;
+        if (t < 0 || t >= 1) continue;
+        if (v.type === 'hit' && assets.hitVFX) {
+          // 闪光：快速放大后收缩消失
+          const scale = t < 0.2 ? 1 + t * 5 : 1 + (1 - t) * 1.25;
+          const alpha = t < 0.15 ? 1 : 1 - (t - 0.15) / 0.85;
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          const s = 28 * scale;
+          ctx.drawImage(assets.hitVFX, v.x - s / 2, v.y - s / 2, s, s);
+          ctx.restore();
+        } else if (v.type === 'dust' && assets.dustVFX) {
+          // 尘土：从小到大扩散 + 淡出
+          const scale = 0.4 + t * 1.2;
+          const alpha = t < 0.3 ? t / 0.3 : 1 - (t - 0.3) / 0.7;
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          const s = 34 * scale;
+          ctx.drawImage(assets.dustVFX, v.x - s / 2, v.y - s / 2, s, s);
+          ctx.restore();
+        } else if (v.type === 'fightVFX' && assets.FightVFX) {
+          // 近战持续扬尘：跟随士兵-海盗中点 + 交战中振荡 / 脱离后淡出
+          let mx = v.x, my = v.y;
+          if (v.soldierId && soldierMap) {
+            const ss = soldierMap[v.soldierId];
+            const pp = pirateMap[v.pirateId];
+            if (ss && pp && ss._px != null && pp._px != null) {
+              mx = (ss._px + pp._px) / 2;
+              my = (ss._py + pp._py) / 2;
+            }
+          }
+          const age = renderNow - v.startTime;
+          const scaleT = Math.min(age / 800, 1);
+          let scale;
+          if (v.alive) {
+            // 交战中：进场膨胀后维持正弦脉动
+            const ageT = age / 800;
+            if (ageT < 0.15) {
+              scale = 0.4 + (ageT / 0.15) * 1.2;
+            } else {
+              scale = 1.3 + 0.3 * Math.sin(ageT * 10);
+            }
+          } else {
+            // 脱离近战：保持最后大小线性淡出
+            scale = 0.4 + scaleT * 1.2;
+          }
+          let alpha;
+          if (v.alive) {
+            // 交战中：快速进场后维持正弦振荡
+            const ageT = age / 800;
+            if (ageT < 0.15) {
+              alpha = (ageT / 0.15) * 0.8;
+            } else {
+              alpha = 0.8 + 0.1 * Math.sin(ageT * 10);
+            }
+          } else {
+            // 脱离近战：800ms 内线性淡出
+            const fadeT = (renderNow - v.lastAlive) / 800;
+            alpha = Math.max(0, 0.8 * (1 - fadeT));
+          }
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, alpha);
+          const s = 34 * scale;
+          ctx.drawImage(assets.FightVFX, mx - s / 2, my - s / 2, s, s);
+          ctx.restore();
+        }
+      }
+    }
+
+    // 建筑 HP 条（战斗中）
+    for (const b of buildings) {
+      const maxHp = b.maxHp || 80;
+      if (b.hp === undefined || b.hp >= maxHp) continue;
+      const bx = b.x * CELL_SIZE;
+      const by = b.y * CELL_SIZE;
+      const bw = CELL_SIZE - 8;
+      const bh = 4;
+      const pct = Math.max(0, b.hp / maxHp);
+      ctx.fillStyle = '#333';
+      ctx.fillRect(bx + 4, by - 8, bw, bh);
+      ctx.fillStyle = pct > 0.5 ? '#4f4' : pct > 0.25 ? '#fc3' : '#f33';
+      ctx.fillRect(bx + 4, by - 8, bw * pct, bh);
+    }
+
+    // 防御塔弹药数（战斗中）
+    if (combatState.phase !== 'idle' && combatState.towers) {
+      const towerById = {};
+      for (const t of combatState.towers) {
+        towerById[t.id] = t;
+      }
+      for (const b of buildings) {
+        if (b.id !== 'defense_tower') continue;
+        const tw = towerById[b.id];
+        if (!tw) continue;
+
+        const bx = b.x * CELL_SIZE;
+        const by = b.y * CELL_SIZE;
+        ctx.textAlign = 'center';
+        if (tw.arrows <= 0) {
+          ctx.fillStyle = '#f33';
+          ctx.font = 'bold 13px Silkscreen, monospace';
+        } else {
+          ctx.fillStyle = '#fff';
+          ctx.font = 'bold 13px Silkscreen, monospace';
+        }
+        // 4-direction outline matching resource bar style
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 3;
+        ctx.strokeText(`${tw.arrows}`, bx + CELL_SIZE / 2, by - 6);
+        ctx.fillText(`${tw.arrows}`, bx + CELL_SIZE / 2, by - 6);
       }
     }
 
     // 幽灵预览
     if (ghost) {
       const { id, spriteIndex, gx, gy, valid } = ghost;
+
+      // 范围预览（防御建筑）
+      if (ghost.range) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(251, 191, 36, 0.12)';
+        ctx.strokeStyle = 'rgba(251, 191, 36, 0.4)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc((gx + 0.5) * S, (gy + 0.5) * S, ghost.range * S, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
 
       // 高亮格子
       ctx.fillStyle = valid ? 'rgba(74, 222, 128, 0.3)' : 'rgba(248, 113, 113, 0.3)';
@@ -146,6 +436,25 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
           variant * 64, 0, 64, 64,
           gx * S, gy * S - 16, S, S
         );
+      } else if (ghost.spriteKey && assets[ghost.spriteKey]) {
+        const img = assets[ghost.spriteKey];
+        const spriteLevels = ghost.spriteLevels || 3;
+        const colW = img.naturalWidth / spriteLevels;
+        const drawH = img.naturalHeight;
+        const extraH = drawH - CELL_SIZE;
+        ctx.drawImage(img,
+          0, 0, colW, drawH,
+          gx * S, gy * S - extraH, S, drawH);
+        // 风车风扇预览（静态）
+        if (ghost.fansSprite && assets[ghost.fansSprite]) {
+          const fansImg = assets[ghost.fansSprite];
+          const pivot = ghost.fansPivot || { x: 47, y: 32 };
+          const cx = gx * S + pivot.x;
+          const cy = gy * S - extraH + pivot.y;
+          const fw = fansImg.naturalWidth;
+          const fh = fansImg.naturalHeight;
+          ctx.drawImage(fansImg, cx - fw / 2, cy - fh / 2, fw, fh);
+        }
       } else if (assets.spritesheet && spriteIndex !== undefined) {
         drawSprite(ctx, assets.spritesheet, spriteIndex, SPRITE.CELL_W, SPRITE.CELL_H,
           gx * S, gy * S, S, S);
@@ -347,9 +656,26 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
 
     // ─── 幽灵预览 ───
     setGhost(building, gx, gy, valid) {
+      let range;
+      if (building?.tierLevels) {
+        // 建筑定义（放置预览）→ Lv1 范围
+        range = building.tierLevels[0]?.range;
+      } else if (building?.id && building?.level) {
+        // 已放置建筑（移动）→ 当前等级范围
+        const def = getBuildingById(building.id);
+        if (def?.tierLevels) {
+          const tier = def.tierLevels.find(t => t.level === building.level);
+          range = tier?.range;
+        }
+      }
       ghost = {
         id: building?.id,
         spriteIndex: building?.spriteIndex,
+        spriteKey: building?.spriteKey,
+        spriteLevels: building?.spriteLevels,
+        fansSprite: building?.fansSprite,
+        fansPivot: building?.fansPivot,
+        range,
         treeVariant: building?._ghostVariant ?? building?.treeVariant,
         gx, gy, valid
       };
@@ -429,7 +755,18 @@ export function createIslandEngine(container, assets, pickupSystem = null, custo
     },
     isMoving() { return moveState !== null; },
     getMoveBuilding() { return moveState?.building ?? null; },
-    getMoveBuildingIndex() { return moveState?.buildingIndex ?? -1; }
+    getMoveBuildingIndex() { return moveState?.buildingIndex ?? -1; },
+
+    /** 设置战斗状态（海盗/士兵）触发重绘 */
+    setCombatState(state) {
+      combatState = state;
+      render();
+    },
+
+    /** 设置非战斗驻守士兵列表 */
+    setOffDutySoldiers(list) {
+      offDutySoldiers = list;
+    }
   };
 
   return island;

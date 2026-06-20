@@ -92,3 +92,58 @@ export const DEFAULT_ISLAND_TERRAIN = [
   [2, 2, 2, 2, 2, 1, 1, 1, 2, 2, 2, 2],
   [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
 ];
+
+// ─── 海盗系统 ───
+
+/** 各tier建筑HP */
+export const BUILDING_HP = {
+  0: 80,
+  1: 150,
+  2: 250,
+  3: 350,
+  4: 400
+};
+
+/** 修复成本系数（per HP） */
+export const REPAIR_COST = {
+  gold: 2,   // 每HP 2 gold
+  wood: 1,   // 每HP 1 wood
+  stone: 0.5 // 每HP 0.5 stone (向下取整)
+};
+
+/** 海盗类型 */
+export const PIRATE_TYPES = [
+  { id: 'raider',  name: '掠夺者', hp: 30, atk: 4,  speed: 3, lootGold: 20, weight: 60 },
+  { id: 'brute',   name: '蛮兵',   hp: 51, atk: 7,  speed: 2, lootGold: 35, weight: 25 },
+  { id: 'captain', name: '船长',   hp: 85, atk: 12, speed: 1, lootGold: 60, weight: 15 }
+];
+
+/** 海盗事件配置 */
+export const PIRATE_EVENT = {
+  /** 激活条件：码头 + 市场同时存在 */
+  activation: ['dock', 'market'],
+  /** 事件间隔（tick数）：~3小时 (18000ms * 600 = ~3h) */
+  intervalTicks: 600,
+  /** 最小间隔（tick）：防止短时间内重复 */
+  minIntervalTicks: 300,
+  /** 每波海盗数量基准 */
+  baseWaveSize: 2,
+  /** 每波额外随机 0~1 */
+  extraRandom: 1,
+  /** 摧毁建筑返还资源比例 */
+  destroyRefund: 0.5,
+  /** 海盗奖励（杀敌掉落）倍率 */
+  rewardMultiplier: 1.0
+};
+
+/** 士兵维护费：gold/兵/tick */
+export const SOLDIER_MAINTENANCE = 0.5;
+
+/** 海盗船 — 单波最多同时存在 */
+export const MAX_PIRATE_SHIPS = 3;
+
+/** 士兵约束：距兵营最大巡逻距离（格） */
+export const SOLDIER_BARRACKS_MAX_DIST = 4;
+
+/** 海盗船每 tick 移动的格数 */
+export const SHIP_SPEED_TILES = 1;

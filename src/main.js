@@ -21,10 +21,13 @@ import { createToast } from './components/Toast.js';
 import { createTutorialGuide } from './components/TutorialGuide.js';
 import { createDailyTasksPanel } from './components/DailyTasksPanel.js';
 import { createStreakPanel, STREAK_MILESTONES } from './components/StreakPanel.js';
+import { createPirateWarning } from './components/PirateWarning.js';
+import { createBarracksPanel } from './ui/BarracksPanel.js';
+import { pirateActivationCheck, spawnWave, movePirates, combatTick, checkDestruction, processWaveEnd, getPirateState, spawnShips, moveShips, disembarkShip } from './core/pirate-engine.js';
 import { getDailyTasks, createTaskTracker, getTaskById, checkTaskComplete } from './data/tasks.js';
 import { transition, getState } from './core/state.js';
-import { STARTING_RESOURCES, ECONOMY_TICK, CELL_SIZE, AppState, DEFAULT_ISLAND_TERRAIN } from './data/constants.js';
-import { getBuildingById, countLearnedWords } from './data/buildings.js';
+import { STARTING_RESOURCES, ECONOMY_TICK, CELL_SIZE, AppState, DEFAULT_ISLAND_TERRAIN, TERRAIN, SOLDIER_BARRACKS_MAX_DIST, PIRATE_EVENT } from './data/constants.js';
+import { getBuildingById, countLearnedWords, getUpgradeStats } from './data/buildings.js';
 import { createNpcEngine } from './core/npc-engine.js';
 import { createNpcQuestPanel } from './components/NpcQuestPanel.js';
 import { play as playSound } from './core/sound.js';
@@ -56,7 +59,9 @@ async function bootstrap() {
       achievements: [],
       timeOffset: 0,
       roadmapRewards: { buildings: [], vocab: 0 },
-      dailyTasks: { date: '', taskIds: [], progress: createTaskTracker().progress, claimed: [] }
+      dailyTasks: { date: '', taskIds: [], progress: createTaskTracker().progress, claimed: [] },
+      pirateState: { phase: 'idle', wave: 0, pirates: [], soldiers: [], towers: [], ships: [], waveTimer: 0 },
+      soldiers: []
     };
   }
 
@@ -87,6 +92,9 @@ async function bootstrap() {
   }
   // 兼容旧存档：NPC 系统
   if (!data.npcs) data.npcs = [];
+  // 兼容旧存档：海盗系统
+  if (!data.pirateState) data.pirateState = { phase: 'idle', wave: 0, pirates: [], soldiers: [], towers: [], ships: [], projectiles: [], vfx: [], waveTimer: 0 };
+  if (!data.soldiers) data.soldiers = [];
 
   // ─── 2. 离线收入结算 ───
   const oldLastOnline = data.island.lastOnline || Date.now();
@@ -395,12 +403,26 @@ async function bootstrap() {
   let npcInteractIndex = -1;
 
   // 动画循环 — 持续渲染以驱动拾取物动画 + NPC 更新
+  // 士兵游走常量（必须在动画循环之前定义，避免 TDZ）
+  const SOLDIER_SPEED = 24;          // px/s, 略慢于 NPC(28)
+  const SOLDIER_DIRS = ['down', 'up', 'right', 'left'];
+  const SOLDIER_DIR_DELTA = { down: [0, 1], up: [0, -1], right: [1, 0], left: [-1, 0] };
+  const DIR_TO_NUM = { down: 0, left: 1, right: 2, up: 3 };
+  const NUM_TO_DIR = { 0: 'down', 1: 'left', 2: 'right', 3: 'up' };
   let lastAnimTime = performance.now();
   (function animLoop(now) {
     const delta = now - lastAnimTime;
     lastAnimTime = now;
     npcEngine.update(delta);
-    island.render();
+    updateOffDutySoldiers(delta);
+    island.setOffDutySoldiers(buildOffDutySoldiers());
+    // 战斗平滑移动
+    smoothCombatUnits(data.pirateState, delta);
+    if (data.pirateState.phase !== 'idle') {
+      island.setCombatState(buildCombatRenderState(data.pirateState));
+    } else {
+      island.render();
+    }
 
     requestAnimationFrame(animLoop);
   })(performance.now());
@@ -749,6 +771,10 @@ async function bootstrap() {
     island.removeBuilding(index);
     data.island.buildings = island.getBuildings();
     data.resources = mergeResources(data.resources, refund);
+    // 拆除兵营时清理关联士兵
+    if (building.id === 'barracks') {
+      data.soldiers = data.soldiers.filter(s => s.barrackId !== building.id);
+    }
     resourceBar.update(data.resources, data.island.level);
     playSound('build_demolish');
     toast.show(`${building.icon || ''} ${building.name || building.id} 已拆除，返还 50% 资源`);
@@ -811,9 +837,90 @@ async function bootstrap() {
         islandContainer.clientHeight / 2
       );
       island.setGhost(building, center.x, center.y, island.isInBounds(center.x, center.y));
+    },
+    // onUpgrade: 建筑升级
+    (buildingId, cost, newLevel) => {
+      if (!canAfford(data.resources, cost)) return;
+      data.resources = deductResources(data.resources, cost);
+      const inst = data.island.buildings.find(b => b.id === buildingId);
+      if (inst) {
+        inst.level = newLevel;
+      }
+      buildDrawer.refresh();
+      resourceBar.update(data.resources, data.island.level);
+      saveGameData(data);
     }
   );
   app.appendChild(buildDrawer.element);
+
+  // ─── 海盗警告条 ───
+  const pirateWarning = createPirateWarning();
+  app.appendChild(pirateWarning.element);
+
+  // ─── 兵营招募面板 ───
+  function getBarracksTier(building) {
+    const def = getBuildingById('barracks');
+    if (!def?.tierLevels) return null;
+    const lvl = building?.level || 1;
+    return def.tierLevels.find(t => t.level === lvl) || def.tierLevels[0];
+  }
+
+  function recruitSoldier(building) {
+    const tier = getBarracksTier(building);
+    if (!tier) return;
+    const barrackSoldiers = data.soldiers.filter(s => s.barrackId === building.id && s.alive);
+    if (barrackSoldiers.length >= tier.capacity) {
+      toast.show('兵营已满员');
+      return;
+    }
+    if ((data.resources.gold || 0) < tier.recruitGold) {
+      toast.show('金币不足');
+      return;
+    }
+    data.resources.gold -= tier.recruitGold;
+    const soldier = {
+      id: `soldier_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      barrackId: building.id,
+      x: building.x, y: building.y,
+      hp: tier.soldierHP, maxHp: tier.soldierHP, atk: tier.soldierATK,
+      alive: true
+    };
+    data.soldiers.push(soldier);
+    saveGameData(data);
+    resourceBar.update(data.resources, data.island.level);
+    toast.show(`⚔️ 士兵已招募！ATK ${tier.soldierATK}  HP ${tier.soldierHP}`);
+    // 刷新面板
+    const idx = island.getBuildings().findIndex(b => b.id === building.id && b.x === building.x && b.y === building.y);
+    barracksPanel.update(building, idx, data.soldiers);
+  }
+
+  function syncSoldierHP() {
+    const ps = data.pirateState;
+    for (const cs of ps.soldiers) {
+      const stored = data.soldiers.find(s => s.id === cs.id);
+      if (stored) {
+        if (cs.hp <= 0) {
+          stored.alive = false;
+        } else {
+          stored.hp = cs.hp;
+          // 同步战斗位置回持久化，避免切到 idle 后跳位
+          stored._px = cs._px;
+          stored._py = cs._py;
+          stored._direction = typeof cs._direction === 'number' ? NUM_TO_DIR[cs._direction] || 'down' : (cs._direction ?? 'down');
+          stored._walkFrame = cs._walkFrame ?? 0;
+        }
+      }
+    }
+    // 清理阵亡士兵（保留最近100条记录防止数组膨胀）
+    data.soldiers = data.soldiers.filter(s => s.alive);
+    saveGameData(data);
+  }
+
+  const barracksPanel = createBarracksPanel(app, {
+    onRecruit: (building) => recruitSoldier(building),
+    onDemolish: (building, index) => demolishBuilding(building, index),
+    onClose: () => {}
+  });
 
   // ─── 拾取物点击事件 ───
   pickupSystem.setOnPickup((reward) => {
@@ -912,16 +1019,21 @@ async function bootstrap() {
       return;
     }
 
-    // ─── 拆除建筑（点击弹出确认窗）───
+    // ─── 建筑交互：兵营 → 招募面板，其他 → 拆除确认 ───
     if (getState() === AppState.IDLE && !isMoveMode) {
       const buildingIdx = island.findBuildingAt(x, y);
       if (buildingIdx >= 0) {
         const building = island.getBuildings()[buildingIdx];
-        showDemolishConfirm(building, buildingIdx);
+        if (building.id === 'barracks') {
+          barracksPanel.update(building, buildingIdx, data.soldiers);
+        } else {
+          showDemolishConfirm(building, buildingIdx);
+        }
         return;
       }
-      // 点击空白处 → 关闭拆除确认窗
+      // 点击空白处 → 关闭面板
       hideDemolishBar();
+      barracksPanel.hide();
     }
 
     // 拾取物检测（非预览模式）
@@ -952,7 +1064,13 @@ async function bootstrap() {
       name: previewBuilding.name,
       icon: previewBuilding.icon,
       spriteIndex: previewBuilding.spriteIndex,
+      spriteKey: previewBuilding.spriteKey,
+      spriteLevels: previewBuilding.spriteLevels,
+      fansSprite: previewBuilding.fansSprite,
+      fansPivot: previewBuilding.fansPivot,
       layer: previewBuilding.layer ?? 1,
+      level: 1,
+      hp: 80,
       x, y
     };
     if (previewBuilding.id === 'tree') {
@@ -999,6 +1117,13 @@ async function bootstrap() {
     if (e.key === 'Escape') {
       if (getState() === AppState.PREVIEW) cancelPreview();
       if (island.isMoving()) { island.cancelMoveBuilding(); cancelMoveUI(); }
+    }
+    // Ctrl+Shift+D → Demo 战斗测试（避开浏览器 Ctrl+Shift+T 重开标签页冲突）
+    if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      setupTestCombat();
     }
   });
 
@@ -1223,7 +1348,951 @@ async function bootstrap() {
     toast.show(`🔥 连续打卡 ${data.stats.streak} 天！`, 2500);
   }
 
-  // ─── 8. 被动收入 tick（含 Buff + 飞入动画）───
+  // ─── 8. 被动收入 tick（含 Buff + 飞入动画 + 海盗状态更新）───
+  // 朝向辅助函数
+  function findNearestTarget(unit, targets) {
+    let best = null, bestDist = Infinity;
+    for (const t of targets) {
+      const d = Math.abs(unit.x - t.x) + Math.abs(unit.y - t.y);
+      if (d < bestDist) { bestDist = d; best = t; }
+    }
+    return best;
+  }
+
+  function directionToward(from, to) {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? 2 : 1; // 右:2, 左:1
+    return dy > 0 ? 0 : 3; // 下:0, 上:3
+  }
+
+  function moveSoldiers(soldiers, pirates) {
+    const alive = pirates.filter(p => p.alive);
+    if (alive.length === 0) return;
+    for (const s of soldiers) {
+      if (s.hp <= 0) continue;
+      const t = findNearestTarget(s, alive);
+      if (!t) continue;
+      const dx = Math.sign(t.x - s.x);
+      const dy = Math.sign(t.y - s.y);
+      if (Math.abs(t.x - s.x) > Math.abs(t.y - s.y)) {
+        s.x += dx;
+      } else {
+        s.y += dy;
+      }
+    }
+  }
+
+  // 海盗战斗引擎：每 ECONOMY_TICK 执行一个战斗回合
+  function pirateTick() {
+    const ps = data.pirateState;
+    const buildings = data.island.buildings || [];
+
+    switch (ps.phase) {
+      case 'idle': {
+        // 检查激活条件
+        if (pirateActivationCheck(buildings)) {
+          ps.phase = 'warning';
+          ps.wave = (ps.wave || 0) + 1;
+          ps.waveTimer = 5; // 5 tick = 90s 倒计时
+          toast.show(`⚠️ 海盗即将来袭！第 ${ps.wave} 波`, 3000);
+        }
+        break;
+      }
+
+      case 'warning': {
+        ps.waveTimer--;
+        if (ps.waveTimer <= 0) {
+          // 生成海盗
+          ps.pirates = spawnWave(buildings, ps.wave);
+          // 使用已招募的驻守士兵
+          const aliveSoldiers = data.soldiers.filter(s => s.alive);
+          ps.soldiers = aliveSoldiers.map(s => ({
+            id: s.id,
+            x: s.x, y: s.y,
+            hp: s.hp, maxHp: s.maxHp, atk: s.atk,
+            barrackId: s.barrackId
+          }));
+          // 采集防御塔
+          ps.towers = buildings
+            .filter(b => b.id === 'defense_tower')
+            .map(tw => {
+              const stats = getUpgradeStats(getBuildingById('defense_tower'), tw.level || 1);
+              const cap = stats?.ammoCapacity || 20;
+              return {
+                id: tw.id, x: tw.x, y: tw.y,
+                level: tw.level || 1,
+                arrows: cap, maxArrows: cap
+              };
+            });
+          ps.phase = 'combat';
+          toast.show(`⚔️ 第 ${ps.wave} 波海盗来袭！`, 3000);
+        }
+        break;
+      }
+
+      case 'combat': {
+        // 快照移动前像素位置（作为 lerp 起点）
+        snapshotCombatPrev(ps);
+        // 移动海盗（朝向建筑，排除树木建筑）
+        const combatBuildings = buildings.filter(b => b.id !== 'tree');
+        movePirates(ps.pirates, combatBuildings);
+        if (!demoCombatTimer) {
+          // 移动士兵（朝向最近海盗）—— Demo 下走实时逐帧移动
+          moveSoldiers(ps.soldiers, ps.pirates);
+        }
+        // 快照移动后像素位置（作为 lerp 终点）
+        snapshotCombatTarget(ps);
+        if (!demoCombatTimer) {
+          // 战斗回合 —— Demo 下走实时近战判定
+          const { pirateLog, buildingDamage } = combatTick(
+            ps.pirates, ps.soldiers, ps.towers, buildings
+          );
+          // 建筑破坏
+          const { destroyed } = checkDestruction(buildings, buildingDamage);
+          if (destroyed.length > 0) {
+            const destroyedRefs = new Set(destroyed);
+            for (let i = data.island.buildings.length - 1; i >= 0; i--) {
+              if (destroyedRefs.has(data.island.buildings[i])) {
+                data.island.buildings.splice(i, 1);
+                island.removeBuilding(i);
+              }
+            }
+            ps.buildingsDestroyed = (ps.buildingsDestroyed || []).concat(destroyed);
+          }
+        }
+
+        // 波次结束判定
+        const allPiratesDead = ps.pirates.every(p => !p.alive);
+        if (allPiratesDead) {
+          const { gold } = processWaveEnd({ piratesDefeated: ps.pirates, wave: ps.wave });
+          data.resources.gold += gold;
+          resourceBar.update(data.resources, data.island.level);
+          // 士兵 lerp 回兵营
+          for (const s of ps.soldiers) {
+            if (s.hp > 0) {
+              s._tx = s.x * CELL_SIZE + CELL_SIZE / 2;
+              s._ty = s.y * CELL_SIZE + CELL_SIZE;
+            }
+          }
+          ps.pirates = ps.pirates.filter(p => p.alive);
+          ps.phase = 'victory';
+          toast.show(`✅ 击退海盗！获得 ${gold}💰`, 3000);
+          // 同步士兵血量回持久存储
+          syncSoldierHP();
+          // 波间回血：存活士兵回复 +10 HP
+          for (const s of ps.soldiers) {
+            if (s.hp > 0) { s.hp = Math.min(s.hp + 10, s.maxHP); }
+          }
+          setTimeout(() => {
+            // 二次同步：将 lerp 回兵营后的最终位置写入 data.soldiers
+            for (const s of ps.soldiers) {
+              if (s.hp > 0) {
+                const stored = data.soldiers.find(ds => ds.id === s.id);
+                if (stored) {
+                  stored._px = s._px; stored._py = s._py;
+                  stored._direction = typeof s._direction === 'number' ? NUM_TO_DIR[s._direction] || 'down' : (s._direction ?? 'down');
+                  stored._walkFrame = s._walkFrame ?? 0;
+                }
+              }
+            }
+            ps.phase = 'idle'; ps.pirates = []; ps.soldiers = []; ps.towers = []; ps.ships = []; ps.projectiles = []; ps.vfx = []; island.setCombatState({ phase: 'idle', pirates: [], soldiers: [], ships: [] }); stopDemoCombatTick();
+          }, 5000);
+        } else if (ps.soldiers.every(s => s.hp <= 0) && ps.towers.every(t => t.arrows <= 0)) {
+          // 兵力全灭 → 防御失败，海盗撤退但造成破坏
+          ps.phase = 'defeat';
+          toast.show('💀 防御失败…', 3000);
+          // 士兵全灭
+          data.soldiers.forEach(s => { s.alive = false; });
+          saveGameData(data);
+          setTimeout(() => { ps.phase = 'idle'; ps.pirates = []; ps.soldiers = []; ps.towers = []; ps.ships = []; ps.projectiles = []; ps.vfx = []; island.setCombatState({ phase: 'idle', pirates: [], soldiers: [], ships: [] }); stopDemoCombatTick(); }, 5000);
+        }
+        break;
+      }
+
+      case 'victory':
+      case 'defeat':
+        // waiting for timeout to reset
+        break;
+    }
+  }
+
+  // ─── Demo 快速战斗 tick（500ms，远快于正常 18s）───
+  var demoCombatTimer = null;
+  var demoWarningTimer = null;
+  function stopDemoCombatTick() {
+    if (demoCombatTimer) { clearInterval(demoCombatTimer); demoCombatTimer = null; }
+    if (demoWarningTimer) { clearTimeout(demoWarningTimer); demoWarningTimer = null; }
+  }
+
+  // ─── 测试用 Demo 关卡：一键触发战斗 ───
+  function setupTestCombat() {
+    const ps = data.pirateState;
+    // 若正在战斗或结算中，先强制重置
+    if (ps.phase !== 'idle') {
+      ps.phase = 'idle';
+      ps.pirates = [];
+      ps.soldiers = [];
+      ps.towers = [];
+      ps.ships = [];
+      ps.projectiles = [];
+      ps.vfx = [];
+      island.setCombatState({ phase: 'idle', pirates: [], soldiers: [], ships: [] });
+      stopDemoCombatTick();
+    }
+
+    let buildings = data.island.buildings || [];
+    const G = 12; // ISLAND_GRID_SIZE
+    const terrainMap = data.island.terrainMap;
+
+    // ─── Demo 自动放置建筑（无资源开局，居中摆放）───
+    function collectBuildableTiles(buildingId) {
+      const tiles = [];
+      for (let gy = 0; gy < G; gy++) {
+        for (let gx = 0; gx < G; gx++) {
+          if (!island.isOccupied(gx, gy) && island.isBuildableFor(buildingId, gx, gy)) {
+            tiles.push({ x: gx, y: gy });
+          }
+        }
+      }
+      return tiles;
+    }
+
+    function makeBuilding(id) {
+      const def = getBuildingById(id);
+      return { id: def.id, name: def.name, icon: def.icon, spriteIndex: def.spriteIndex, spriteKey: def.spriteKey, spriteLevels: def.spriteLevels, fansSprite: def.fansSprite, fansPivot: def.fansPivot, layer: def.layer ?? 1, level: 1, hp: 80, maxHp: 80, x: 0, y: 0 };
+    }
+
+    // 居中摆放兵营：6×6 中心区域优先
+    // 放置 1 个兵营
+    if (buildings.filter(b => b.id === 'barracks').length === 0) {
+      const slot = { x: 5, y: 6 };
+      const exists = island.isOccupied(slot.x, slot.y);
+      const buildable = island.isBuildableFor('barracks', slot.x, slot.y);
+      if (!exists && buildable) {
+        const bld = makeBuilding('barracks');
+        bld.x = slot.x; bld.y = slot.y;
+        island.addBuilding(bld);
+      } else {
+        const tiles = collectBuildableTiles('barracks');
+        tiles.sort((a, b) => (Math.abs(a.x - 5) + Math.abs(a.y - 5)) - (Math.abs(b.x - 5) + Math.abs(b.y - 5)));
+        const fallback = tiles.find(t => !island.isOccupied(t.x, t.y));
+        if (fallback) {
+          const bld = makeBuilding('barracks');
+          bld.x = fallback.x; bld.y = fallback.y;
+          island.addBuilding(bld);
+        }
+      }
+    }
+
+    // 放置 1 个防御塔
+    if (buildings.filter(b => b.id === 'defense_tower').length === 0) {
+      const slot = { x: 6, y: 5 };
+      const exists = island.isOccupied(slot.x, slot.y);
+      const buildable = island.isBuildableFor('defense_tower', slot.x, slot.y);
+      if (!exists && buildable) {
+        const bld = makeBuilding('defense_tower');
+        bld.x = slot.x; bld.y = slot.y;
+        island.addBuilding(bld);
+      } else {
+        const tiles = collectBuildableTiles('defense_tower');
+        tiles.sort((a, b) => (Math.abs(a.x - 5) + Math.abs(a.y - 5)) - (Math.abs(b.x - 5) + Math.abs(b.y - 5)));
+        const fallback = tiles.find(t => !island.isOccupied(t.x, t.y));
+        if (fallback) {
+          const bld = makeBuilding('defense_tower');
+          bld.x = fallback.x; bld.y = fallback.y;
+          island.addBuilding(bld);
+        }
+      }
+    }
+
+    // 同步 buildings 引用（island.addBuilding 写入内部数组）
+    buildings = island.getBuildings();
+    data.island.buildings = buildings;
+
+    // 若有新建筑则存档
+    if (data.island.buildings.length > (data._demoBuildingsPlaced ?? 0)) {
+      data._demoBuildingsPlaced = data.island.buildings.length;
+      saveGameData(data);
+    }
+
+    ps.wave = (ps.wave || 0) + 1;
+
+    // - 海盗在 2 秒警告期后由 timeout 生成 -
+
+    // Demo 模式：清已死 demo 兵，存活 demo 兵保留复用
+    data.soldiers = data.soldiers.filter(s => !s.id.startsWith('demo_') || s.alive);
+    const existingSoldiers = data.soldiers.filter(s => s.alive);
+    const barracks = buildings.filter(b => b.id === 'barracks');
+    const recruitCount = Math.min(barracks.length * 2, 10);
+    const needRecruit = Math.max(0, recruitCount - existingSoldiers.length);
+    for (let i = 0; i < needRecruit; i++) {
+      const b = barracks[i % barracks.length];
+      const ox = ((i % 5) - 2) * 12 + (Math.random() - 0.5) * 8;
+      const oy = (Math.floor(i / 5) - 1) * 12 + (Math.random() - 0.5) * 8;
+      data.soldiers.push({
+        id: `demo_${ps.wave}_${i}_${Date.now()}`,
+        x: b.x, y: b.y,
+        _px: (b.x + 0.5) * CELL_SIZE + ox,
+        _py: (b.y + 0.5) * CELL_SIZE + oy,
+        _direction: 0,
+        _walkFrame: 0, _walkTimer: 0,
+        hp: 100, maxHp: 100, atk: 15,
+        barrackId: b.id,
+        alive: true
+      });
+    }
+    saveGameData(data);
+
+    // 从建筑列表提取防御塔
+    ps.towers = buildings
+      .filter(b => b.id === 'defense_tower')
+      .map(tw => {
+        const stats = getUpgradeStats(getBuildingById('defense_tower'), tw.level || 1);
+        const cap = stats?.ammoCapacity || 20;
+        return {
+          id: tw.id, x: tw.x, y: tw.y,
+          level: tw.level || 1,
+          arrows: cap, maxArrows: cap
+        };
+      });
+    // warning 阶段填充士兵渲染数据，确保游走可见
+    ps.soldiers = data.soldiers.filter(s => s.alive).map(s => ({
+      id: s.id, x: s.x, y: s.y,
+      hp: s.hp, maxHp: s.maxHp, atk: s.atk,
+      barrackId: s.barrackId,
+      _px: s._px, _py: s._py,
+      _tx: s._px, _ty: s._py,
+      _direction: s._direction ?? 0,
+      _walkFrame: s._walkFrame ?? 0,
+      _walkTimer: s._walkTimer ?? 0
+    }));
+    ps.pirates = [];
+    ps.phase = 'warning';
+    toast.show(`⚔️ Wave ${ps.wave} incoming — ${data.soldiers.filter(s => s.alive).length} soldiers ready`, 3000);
+
+    // 预计算海盗总数，生成海盗船
+    const totalPirates = PIRATE_EVENT.baseWaveSize
+      + Math.floor(Math.random() * (PIRATE_EVENT.extraRandom + 1))
+      + Math.min(ps.wave - 1, 5);
+    ps.ships = spawnShips(terrainMap, ps.wave, G, totalPirates);
+    // 记录每艘船的起始像素位置和 warning 结束时间，用于时间驱动插值
+    for (const s of ps.ships) {
+      s._startPx = s._px;
+      s._startPy = s._py;
+    }
+    ps.warningEndTime = performance.now() + 2000;
+
+    // 停旧 timer，2 秒后靠岸 → 下船 → 转入战斗
+    stopDemoCombatTick();
+    demoWarningTimer = setTimeout(() => {
+      // 船只靠岸（时间插值已接近目标，微调至精确位置）
+      for (const s of ps.ships) {
+        s.x = s.targetX;
+        s.y = s.targetY;
+        s._px = s.x * CELL_SIZE + CELL_SIZE / 2;
+        s._py = s.y * CELL_SIZE + CELL_SIZE / 2;
+        s.state = 'docked';
+      }
+
+      // 海盗下船
+      let iOff = 0;
+      for (const ship of ps.ships) {
+        const newPirates = disembarkShip(ship, ps.wave, iOff);
+        ps.pirates.push(...newPirates);
+        // 海盗从水格推到相邻陆地
+        for (const p of newPirates) {
+          const neighbors = [[p.x, p.y - 1], [p.x, p.y + 1], [p.x - 1, p.y], [p.x + 1, p.y]];
+          for (const [nx, ny] of neighbors) {
+            if (nx >= 0 && nx < G && ny >= 0 && ny < G && terrainMap[ny][nx] !== TERRAIN.WATER) {
+              p.x = nx;
+              p.y = ny;
+              break;
+            }
+          }
+        }
+        iOff += newPirates.length;
+      }
+
+      const aliveSoldiers = data.soldiers.filter(s => s.alive);
+      ps.soldiers = aliveSoldiers.map(s => ({
+        id: s.id, x: s.x, y: s.y,
+        hp: s.hp, maxHp: s.maxHp, atk: s.atk,
+        barrackId: s.barrackId,
+        _px: s._px, _py: s._py,
+        _tx: s._px, _ty: s._py,
+        _direction: s._direction ?? 0,
+        _walkFrame: s._walkFrame ?? 0,
+        _walkTimer: s._walkTimer ?? 0
+      }));
+      ps.phase = 'combat';
+      demoWarningTimer = null;
+      toast.show(`⚔️ Demo Wave ${ps.wave} — ${ps.pirates.length} pirates from ${ps.ships.length} ships`, 3000);
+
+      demoCombatTimer = setInterval(() => {
+        if (ps.phase !== 'combat') {
+          if (ps.phase === 'victory' || ps.phase === 'defeat') {
+            stopDemoCombatTick();
+          }
+          return;
+        }
+        pirateTick();
+      }, 1500);
+    }, 2000);
+  }
+
+  // ─── 战斗单位平滑移动 + 动画（逐帧）───
+  function initCombatUnitPos(u) {
+    if (u._px === undefined) {
+      u._px = u.x * CELL_SIZE + CELL_SIZE / 2;
+      u._py = u.y * CELL_SIZE + CELL_SIZE;
+      u._tx = u._px;
+      u._ty = u._py;
+      u._direction = 0; // down
+      u._walkFrame = 0;
+      u._walkTimer = 0;
+    }
+  }
+
+  function snapshotCombatPrev(ps) {
+    for (const u of ps.pirates) { if (!u.alive) continue; initCombatUnitPos(u); u._prevTx = u._tx; u._prevTy = u._ty; }
+    for (const s of ps.soldiers) { if (s.hp <= 0) continue; initCombatUnitPos(s); s._prevTx = s._tx; s._prevTy = s._ty; }
+  }
+
+  function snapshotCombatTarget(ps) {
+    for (const u of ps.pirates) {
+      if (!u.alive) continue;
+      u._tx = u.x * CELL_SIZE + CELL_SIZE / 2;
+      u._ty = u.y * CELL_SIZE + CELL_SIZE;
+    }
+    for (const s of ps.soldiers) {
+      if (s.hp <= 0) continue;
+      s._tx = s.x * CELL_SIZE + CELL_SIZE / 2;
+      s._ty = s.y * CELL_SIZE + CELL_SIZE;
+    }
+  }
+
+  function smoothCombatUnits(ps, deltaMs) {
+    if (ps.phase !== 'combat' && ps.phase !== 'warning' && ps.phase !== 'victory' && ps.phase !== 'defeat') return;
+    const COMBAT_SPEED = demoCombatTimer ? 32 : 32; // px/s，Demo 正常速度
+    const moveAmount = COMBAT_SPEED * deltaMs / 1000;
+    const G = 12;
+
+    // ─── 船只平滑航行（warning 阶段，时间驱动插值，仅水格）───
+    const shipTerrainMap = data.island.terrainMap;
+    if (ps.phase === 'warning' && ps.ships && ps.warningEndTime && shipTerrainMap) {
+      const remaining = ps.warningEndTime - performance.now();
+      const duration = 2000; // warning 总时长
+      const t = Math.min(1, Math.max(0, 1 - remaining / duration)); // 0→1 over 2s
+      for (const s of ps.ships) {
+        if (s.state !== 'sailing') continue;
+        const tx = s.targetX * CELL_SIZE + CELL_SIZE / 2;
+        const ty = s.targetY * CELL_SIZE + CELL_SIZE / 2;
+        s._px = s._startPx + (tx - s._startPx) * t;
+        s._py = s._startPy + (ty - s._startPy) * t;
+        s._tx = tx;
+        s._ty = ty;
+        // 强制 clamp 到水格，防止直线路径穿越陆地
+        const gx = Math.round((s._px - CELL_SIZE / 2) / CELL_SIZE);
+        const gy = Math.round((s._py - CELL_SIZE / 2) / CELL_SIZE);
+        if (gy >= 0 && gy < G && gx >= 0 && gx < G && shipTerrainMap[gy][gx] !== TERRAIN.WATER) {
+          const dx = Math.sign(s.targetX - gx);
+          const dy = Math.sign(s.targetY - gy);
+          let clamped = false;
+          for (const [nx, ny] of [[gx + dx, gy], [gx, gy + dy], [gx + dx, gy + dy], [gx - dx, gy - dy], [gx + 1, gy], [gx - 1, gy], [gx, gy + 1], [gx, gy - 1]]) {
+            if (nx >= 0 && nx < G && ny >= 0 && ny < G && shipTerrainMap[ny][nx] === TERRAIN.WATER) {
+              s._px = nx * CELL_SIZE + CELL_SIZE / 2;
+              s._py = ny * CELL_SIZE + CELL_SIZE / 2;
+              clamped = true;
+              break;
+            }
+          }
+          if (!clamped) {
+            // 极少情况：还原到起点水格
+            s._px = s._startPx;
+            s._py = s._startPy;
+          }
+        }
+      }
+    }
+
+    for (const u of ps.pirates) {
+      if (!u.alive) continue;
+      initCombatUnitPos(u);
+      let tx = u._tx ?? u._px;
+      let ty = u._ty ?? u._py;
+      const dx = tx - u._px;
+      const dy = ty - u._py;
+      const dist = Math.hypot(dx, dy);
+      if (dist <= moveAmount) {
+        u._px = tx;
+        u._py = ty;
+      } else {
+        const ratio = moveAmount / dist;
+        u._px += dx * ratio;
+        u._py += dy * ratio;
+      }
+    }
+
+    // ─── 士兵移动 + 约束 ───
+    const blds = data.island.buildings || [];
+    const terrainMap = data.island.terrainMap;
+    const maxDistPx = SOLDIER_BARRACKS_MAX_DIST * CELL_SIZE;
+
+    for (const s of ps.soldiers) {
+      if (s.hp <= 0) continue;
+      initCombatUnitPos(s);
+
+      if (demoCombatTimer && ps.phase === 'combat') {
+        const alivePirates = ps.pirates.filter(p => p.alive);
+        if (alivePirates.length > 0) {
+          let nearest = alivePirates[0];
+          let minDist = Math.hypot(nearest._px - s._px, nearest._py - s._py);
+          for (const p of alivePirates) {
+            const d = Math.hypot(p._px - s._px, p._py - s._py);
+            if (d < minDist) { minDist = d; nearest = p; }
+          }
+          s._tx = nearest._px;
+          s._ty = nearest._py;
+        }
+
+        // 约束 1：距兵营最大距离
+        const barrack = blds.find(b => b.id === 'barracks' && b.id === s.barrackId)
+          || blds.find(b => b.id === 'barracks');
+        if (barrack) {
+          const bx = barrack.x * CELL_SIZE + CELL_SIZE / 2;
+          const by = barrack.y * CELL_SIZE + CELL_SIZE / 2;
+          const sd = Math.hypot(s._tx - bx, s._ty - by);
+          if (sd > maxDistPx) {
+            const angle = Math.atan2(s._ty - by, s._tx - bx);
+            s._tx = bx + Math.cos(angle) * maxDistPx;
+            s._ty = by + Math.sin(angle) * maxDistPx;
+          }
+        }
+
+        // 约束 2：禁止入水
+        const gx = Math.round(s._tx / CELL_SIZE);
+        const gy = Math.round((s._ty - CELL_SIZE / 4) / CELL_SIZE);
+        if (gx >= 0 && gx < G && gy >= 0 && gy < G && terrainMap[gy][gx] === TERRAIN.WATER) {
+          if (barrack) {
+            const bx = barrack.x * CELL_SIZE + CELL_SIZE / 2;
+            const by = barrack.y * CELL_SIZE + CELL_SIZE / 2;
+            s._tx = s._px + (bx - s._px) * 0.3;
+            s._ty = s._py + (by - s._py) * 0.3;
+          }
+        }
+      }
+
+      let tx = s._tx ?? s._px;
+      let ty = s._ty ?? s._py;
+      const dx = tx - s._px;
+      const dy = ty - s._py;
+      const dist = Math.hypot(dx, dy);
+      if (dist <= moveAmount) {
+        s._px = tx;
+        s._py = ty;
+      } else {
+        const ratio = moveAmount / dist;
+        s._px += dx * ratio;
+        s._py += dy * ratio;
+      }
+    }
+
+    // warning 阶段：同步 data.soldiers 游走位置到 ps.soldiers 渲染
+    if (ps.phase === 'warning') {
+      const aliveSoldiers = data.soldiers.filter(s => s.alive);
+      for (const s of ps.soldiers) {
+        const src = aliveSoldiers.find(ds => ds.id === s.id);
+        if (src) {
+          s._px = src._px; s._py = src._py;
+          s._direction = DIR_TO_NUM[src._direction] ?? 0;
+          s._walkFrame = src._walkFrame ?? 0;
+        }
+      }
+    }
+
+    // ─── 持续扬尘（Demo + 正式游戏共用）───
+    if (ps.phase === 'combat') {
+      const MELEE_RANGE = 44;    // px
+      const MAX_DUST = 5;
+      const dustNow = performance.now();
+
+      // 收集所有近战范围内的 pair + 距离
+      const pairs = [];
+      for (const s of ps.soldiers) {
+        if (s.hp <= 0) continue;
+        for (const p of ps.pirates) {
+          if (!p.alive) continue;
+          const d = Math.hypot(p._px - s._px, p._py - s._py);
+          if (d <= MELEE_RANGE) {
+            pairs.push({ key: s.id + '_' + p.id, s, p, d });
+          }
+        }
+      }
+      pairs.sort((a, b) => a.d - b.d);
+      const top5 = pairs.slice(0, MAX_DUST);
+      const topKeys = new Set(top5.map(p => p.key));
+
+      // 单遍遍历：构建查找表 + 标记淡出 + 清理
+      if (!ps.vfx) ps.vfx = [];
+      const dustMap = new Map();
+      for (let i = ps.vfx.length - 1; i >= 0; i--) {
+        const v = ps.vfx[i];
+        if (v.type !== 'fightVFX') continue;
+        if (!v.alive && dustNow - v.lastAlive >= 800) {
+          ps.vfx.splice(i, 1);
+          continue;
+        }
+        dustMap.set(v.pairKey, v);
+        if (!topKeys.has(v.pairKey) && v.alive) {
+          v.alive = false;
+          v.lastAlive = dustNow;
+        }
+      }
+
+      // 只为 top5 创建/维持扬尘
+      for (const { key, s, p } of top5) {
+        let existing = dustMap.get(key);
+        if (existing) {
+          existing.alive = true;
+          existing.lastAlive = dustNow;
+          existing.x = (s._px + p._px) / 2;
+          existing.y = (s._py + p._py) / 2;
+        } else {
+          const newDust = {
+            type: 'fightVFX',
+            pairKey: key,
+            x: (s._px + p._px) / 2, y: (s._py + p._py) / 2,
+            startTime: dustNow,
+            duration: 99999,
+            lastAlive: dustNow,
+            alive: true,
+            soldierId: s.id, pirateId: p.id
+          };
+          ps.vfx.push(newDust);
+          dustMap.set(key, newDust);
+        }
+      }
+
+      // 记录当前交战中的单位（用于隐藏 sprite）
+      const combatSoldierIds = new Set();
+      const combatPirateIds = new Set();
+      for (const { s, p } of top5) {
+        combatSoldierIds.add(s.id);
+        combatPirateIds.add(p.id);
+      }
+      ps._combatSoldierIds = combatSoldierIds;
+      ps._combatPirateIds = combatPirateIds;
+    }
+
+    // ─── Demo 实时近战判定 ───
+    if (demoCombatTimer) {
+      const ATK_INTERVAL = 600; // ms
+      const MELEE_RANGE = 44;    // px
+
+      // 1. 士兵攻击海盗（需接触）
+      for (const s of ps.soldiers) {
+        if (s.hp <= 0) continue;
+        s._rtAtkTimer = (s._rtAtkTimer || 0) + deltaMs;
+        if (s._rtAtkTimer < ATK_INTERVAL) continue;
+        s._rtAtkTimer -= ATK_INTERVAL;
+        for (const p of ps.pirates) {
+          if (!p.alive) continue;
+          const d = Math.hypot(p._px - s._px, p._py - s._py);
+          if (d <= MELEE_RANGE) {
+            p.hp -= s.atk;
+            if (p.hp <= 0) p.alive = false;
+            break;
+          }
+        }
+      }
+
+      // 2. 海盗攻击士兵（需接触）
+      for (const p of ps.pirates) {
+        if (!p.alive) continue;
+        p._rtAtkTimer = (p._rtAtkTimer || 0) + deltaMs;
+        if (p._rtAtkTimer < ATK_INTERVAL) continue;
+        p._rtAtkTimer -= ATK_INTERVAL;
+        for (const s of ps.soldiers) {
+          if (s.hp <= 0) continue;
+          const d = Math.hypot(p._px - s._px, p._py - s._py);
+          if (d <= MELEE_RANGE) {
+            s.hp -= p.atk;
+            break;
+          }
+        }
+      }
+
+      // 3. 海盗攻击建筑（需踩在建筑格子上，排除装饰性 tree）
+      const blds = (data.island.buildings || []).filter(b => b.id !== 'tree');
+      for (const p of ps.pirates) {
+        if (!p.alive) continue;
+        const gx = p.x;
+        const gy = p.y;
+        const bld = blds.find(b => b.x === gx && b.y === gy && (b.hp ?? 80) > 0);
+        if (bld) {
+          // 视觉距离校验：海盗必须视觉到达建筑格内才攻击
+          const bldCx = bld.x * 64 + 32;
+          const bldCy = bld.y * 64 + 32;
+          const visDist = Math.hypot(p._px - bldCx, p._py - bldCy);
+          if (visDist > 64) continue;
+          p._rtBldTimer = (p._rtBldTimer || 0) + deltaMs;
+          if (p._rtBldTimer >= ATK_INTERVAL) {
+            p._rtBldTimer -= ATK_INTERVAL;
+            bld.hp = (bld.hp ?? 80) - p.atk;
+            if (bld.hp <= 0) {
+              // 建筑摧毁
+              const idx = data.island.buildings.indexOf(bld);
+              if (idx >= 0) {
+                data.island.buildings.splice(idx, 1);
+                island.removeBuilding(idx);
+              }
+            }
+          }
+        } else {
+          p._rtBldTimer = 0;
+        }
+      }
+
+      // 4. 防御塔攻击海盗（射程内自动射击，箭矢优先 → 炮弹）
+      ps.projectiles = ps.projectiles || [];
+      const now = performance.now();
+      for (const tw of ps.towers) {
+        const stats = getUpgradeStats(getBuildingById('defense_tower'), tw.level || 1);
+        if (!stats || tw.arrows <= 0) continue;
+        tw._rtAtkTimer = (tw._rtAtkTimer || 0) + deltaMs;
+        if (tw._rtAtkTimer < ATK_INTERVAL) continue;
+        tw._rtAtkTimer -= ATK_INTERVAL;
+        const rangePx = stats.range * CELL_SIZE;
+        const towerCx = tw.x * CELL_SIZE + CELL_SIZE / 2;
+        const towerCy = tw.y * CELL_SIZE + CELL_SIZE / 2;
+        for (const p of ps.pirates) {
+          if (!p.alive) continue;
+          if (tw.arrows <= 0) break;
+          const d = Math.hypot(p._px - towerCx, p._py - towerCy);
+          if (d > rangePx) continue;
+          p.hp -= stats.arrowDMG;
+          tw.arrows--;
+          // 创建射弹
+          ps.projectiles.push({
+            type: 'arrow',
+            startX: towerCx, startY: towerCy - 8,
+            endX: p._px, endY: p._py - 16,
+            startTime: now,
+            duration: 280,
+            targetId: p.id
+          });
+          // 塔基尘土
+          ps.vfx.push({
+            type: 'dust',
+            x: towerCx, y: towerCy + CELL_SIZE / 2 - 4,
+            startTime: now,
+            duration: 350
+          });
+          if (p.hp <= 0) p.alive = false;
+        }
+      }
+
+      // 更新射弹 & 命中 VFX
+      for (let i = ps.projectiles.length - 1; i >= 0; i--) {
+        const pr = ps.projectiles[i];
+        const elapsed = now - pr.startTime;
+        if (elapsed >= pr.duration) {
+          // 命中闪光
+          ps.vfx.push({
+            type: 'hit',
+            x: pr.endX, y: pr.endY,
+            startTime: now,
+            duration: 250
+          });
+          ps.projectiles.splice(i, 1);
+        }
+      }
+      // 清理过期 VFX
+      ps.vfx = ps.vfx.filter(v => (now - v.startTime) < v.duration);
+    }
+
+    updateCombatAnim(ps, deltaMs);
+  }
+
+  function updateCombatAnim(ps, deltaMs) {
+    const WALK_MS = 120;
+    for (const u of ps.pirates) {
+      if (!u.alive) continue;
+      const dx = (u._tx ?? u._px) - u._px;
+      const dy = (u._ty ?? u._py) - u._py;
+      const moving = Math.abs(dx) + Math.abs(dy) > 0.5;
+      if (moving) {
+        // 方向：从速度向量推断
+        if (Math.abs(dx) > Math.abs(dy)) u._direction = dx > 0 ? 2 : 1;
+        else u._direction = dy > 0 ? 0 : 3;
+      }
+      // 战斗期间不停步，持续播放动画
+      u._walkTimer += deltaMs;
+      if (u._walkTimer >= WALK_MS) {
+        u._walkFrame = (u._walkFrame + 1) % 3;
+        u._walkTimer -= WALK_MS;
+      }
+    }
+    for (const s of ps.soldiers) {
+      if (s.hp <= 0) continue;
+      const dx = (s._tx ?? s._px) - s._px;
+      const dy = (s._ty ?? s._py) - s._py;
+      const moving = Math.abs(dx) + Math.abs(dy) > 0.5;
+      if (moving) {
+        if (Math.abs(dx) > Math.abs(dy)) s._direction = dx > 0 ? 2 : 1;
+        else s._direction = dy > 0 ? 0 : 3;
+      }
+      // 战斗期间不停步，持续播放动画
+      s._walkTimer += deltaMs;
+      if (s._walkTimer >= WALK_MS) {
+        s._walkFrame = (s._walkFrame + 1) % 3;
+        s._walkTimer -= WALK_MS;
+      }
+    }
+  }
+
+  function buildCombatRenderState(ps) {
+    return {
+      phase: ps.phase,
+      wave: ps.wave,
+      pirates: ps.pirates.map(p => ({
+        id: p.id, alive: p.alive, hp: p.hp, maxHp: p.maxHp, atk: p.atk,
+        x: p._px / CELL_SIZE,
+        y: p._py / CELL_SIZE,
+        _px: p._px, _py: p._py,
+        _direction: p._direction ?? 0,
+        _walkFrame: p._walkFrame ?? 0,
+        _lastFrameTime: 1e15
+      })),
+      soldiers: ps.soldiers.map(s => ({
+        id: s.id, hp: s.hp, maxHp: s.maxHp, atk: s.atk,
+        x: s._px / CELL_SIZE,
+        y: s._py / CELL_SIZE,
+        _px: s._px, _py: s._py,
+        _direction: s._direction ?? 0,
+        _walkFrame: s._walkFrame ?? 0,
+        _lastFrameTime: 1e15
+      })),
+      towers: ps.towers,
+      ships: (ps.ships || []).map(s => ({
+        id: s.id,
+        x: s._px / CELL_SIZE,
+        y: s._py / CELL_SIZE,
+        state: s.state
+      })),
+      projectiles: (ps.projectiles || []).map(p => ({ ...p })),
+      vfx: (ps.vfx || []).map(v => ({ ...v })),
+      _hasFightVFX: (ps.vfx || []).some(v => v.type === 'fightVFX'),
+      _combatSoldierIds: ps._combatSoldierIds || new Set(),
+      _combatPirateIds: ps._combatPirateIds || new Set()
+    };
+  }
+
+  // ─── 非战斗士兵游走 ───
+
+  function updateOffDutySoldiers(deltaMs) {
+    const soldiers = data.soldiers.filter(s => s.alive);
+    if (soldiers.length === 0) return;
+
+    for (const s of soldiers) {
+      // 首次初始化像素位置
+      if (s._px === undefined) {
+        s._px = s.x * CELL_SIZE + CELL_SIZE / 2;
+        s._py = s.y * CELL_SIZE + CELL_SIZE;
+      }
+      if (!s._state) s._state = 'idle';
+      if (!s._wanderTimer) s._wanderTimer = 0;
+      if (!s._walkMax) s._walkMax = 0;
+      if (!s._walkFrameTimer) s._walkFrameTimer = 0;
+      if (!s._walkFrame) s._walkFrame = 0;
+      // 防御：存档中遗留的数字方向转为字符串
+      if (typeof s._direction === 'number') s._direction = NUM_TO_DIR[s._direction] || 'down';
+
+      const now = Date.now();
+
+      if (s._state === 'idle') {
+        s._wanderTimer += deltaMs;
+        if (s._wanderTimer >= (s._wanderInterval || 2000)) {
+          s._wanderTimer = 0;
+          s._wanderInterval = Math.random() * 3000 + 2000; // 2-5s 间隔
+          // 随机选方向 → 进入漫游
+          s._direction = SOLDIER_DIRS[Math.floor(Math.random() * SOLDIER_DIRS.length)];
+          s._walkFrame = 0;
+          s._walkFrameTimer = 0;
+          s._walkDuration = 0;
+          s._walkMax = Math.random() * 4000 + 2000; // 2-6s 行走时长
+          s._state = 'wandering';
+        }
+      } else if (s._state === 'wandering') {
+        // 行走时长限制
+        s._walkDuration += deltaMs;
+        if (s._walkDuration >= s._walkMax) {
+          s._state = 'idle';
+          s._wanderTimer = 0;
+          s._wanderInterval = Math.random() * 3000 + 2000;
+          continue;
+        }
+        // 方向切换：每 2-4s 有 40% 概率换方向（比 NPC 的 65% 更低，士兵更专注）
+        s._wanderTimer += deltaMs;
+        if (s._wanderTimer >= (s._wanderInterval || 2000)) {
+          s._wanderTimer = 0;
+          s._wanderInterval = Math.random() * 2000 + 2000;
+          if (Math.random() < 0.4) {
+            s._direction = SOLDIER_DIRS[Math.floor(Math.random() * SOLDIER_DIRS.length)];
+            s._walkFrame = 0;
+          }
+        }
+        // 像素移动 + 围栏限制
+        const moveAmount = SOLDIER_SPEED * deltaMs / 1000;
+        const [ddx, ddy] = SOLDIER_DIR_DELTA[s._direction];
+        let nextPx = s._px + ddx * moveAmount;
+        let nextPy = s._py + ddy * moveAmount;
+        // 限制在兵营半径内
+        const cx = s.x * CELL_SIZE + CELL_SIZE / 2;
+        const cy = s.y * CELL_SIZE + CELL_SIZE;
+        const dist = Math.hypot(nextPx - cx, nextPy - cy);
+        if (dist <= 2.5 * CELL_SIZE) {
+          s._px = nextPx;
+          s._py = nextPy;
+        } else {
+          // 碰边界 → 掉头
+          s._state = 'idle';
+          s._wanderTimer = 0;
+          s._wanderInterval = Math.random() * 2000 + 1000;
+        }
+        // 行走动画
+        const WALK_MS = 150;
+        s._walkFrameTimer += deltaMs;
+        if (s._walkFrameTimer >= WALK_MS) {
+          s._walkFrame = (s._walkFrame + 1) % 3;
+          s._walkFrameTimer -= WALK_MS;
+        }
+      }
+      // idle 不动时 static frame
+    }
+  }
+
+  function buildOffDutySoldiers() {
+    const soldiers = data.soldiers.filter(s => s.alive);
+    return soldiers.map(s => {
+      if (!s._renderObj) {
+        s._renderObj = { _lastFrameTime: 0, _walkFrame: 0 };
+      }
+      const isWalking = s._state === 'wandering';
+      s._renderObj.id = s.id;
+      s._renderObj.x = s._px / CELL_SIZE;
+      s._renderObj.y = s._py / CELL_SIZE;
+      s._renderObj.hp = s.hp;
+      s._renderObj.maxHp = s.maxHp;
+      s._renderObj.atk = s.atk;
+      s._renderObj._walkFrame = isWalking ? s._walkFrame : 1;
+      s._renderObj._lastFrameTime = 1e15;
+      s._renderObj._direction = isWalking ? (DIR_TO_NUM[s._direction] ?? 0) : 0;
+      return s._renderObj;
+    });
+  }
+
   setInterval(() => {
     const { income, breakdown } = tickIncomeWithBuffs(data.island.buildings, data.stats);
     if (Object.keys(income).length > 0) {
@@ -1243,6 +2312,12 @@ async function bootstrap() {
       if (breakdown.length > 0) animateTickIncome(breakdown);
       updateLevel();
     }
+    // 海盗战斗 tick（Demo 快速战斗中跳过，由 demoCombatTimer 接管；warning 由 demoWarningTimer 接管）
+    if (!demoCombatTimer && data.pirateState.phase !== 'warning') pirateTick();
+    // 海盗状态 UI 更新
+    pirateWarning.update(data.pirateState);
+    // 非战斗驻守士兵渲染
+    island.setOffDutySoldiers(buildOffDutySoldiers());
   }, ECONOMY_TICK);
 
   // ─── 9. 自动存档（30s）───
